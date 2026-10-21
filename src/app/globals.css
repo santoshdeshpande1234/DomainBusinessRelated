@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #f1f3f9;
+  --ink: #111827;
+  --muted: #5b6475;
+  --faint: #8a93a6;
+  --line: #e3e7ef;
+  --accent: #4f46e5;
+  --accent-ink: #ffffff;
+  --accent-soft: #eef0ff;
+  --good: #0f7a4f;
+  --good-soft: #e5f6ee;
+  --warn: #9a5b00;
+  --warn-soft: #fdf3e2;
+  --bad: #b42318;
+  --bad-soft: #fdecea;
+  --ring: rgba(79, 70, 229, 0.35);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1017;
+    --surface: #151a23;
+    --surface-2: #1c2230;
+    --ink: #e8ebf2;
+    --muted: #a3abbd;
+    --faint: #737c90;
+    --line: #262d3b;
+    --accent: #8b85ff;
+    --accent-ink: #0d1017;
+    --accent-soft: #23234a;
+    --good: #4fd19a;
+    --good-soft: #10291f;
+    --warn: #f0b45a;
+    --warn-soft: #2d2212;
+    --bad: #ff8a80;
+    --bad-soft: #321716;
+    --ring: rgba(139, 133, 255, 0.4);
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@utility card { @apply rounded-xl border border-line bg-surface; }
+@utility btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)]; }
+@utility btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] bg-accent text-accent-ink hover:opacity-90; }
+@utility btn-secondary { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] border border-line bg-surface text-ink hover:bg-surface-2; }
+@utility btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] text-muted hover:bg-surface-2 hover:text-ink; }
+@utility btn-danger { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--ring)] border border-line bg-surface text-bad hover:bg-bad-soft; }
+@utility input { @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-accent focus:outline-none focus:ring-4 focus:ring-[var(--ring)] disabled:opacity-60; }
+@utility label { @apply mb-1.5 block text-sm font-medium text-ink; }
+@utility hint { @apply mt-1 text-xs text-muted; }
+@utility error { @apply mt-1 text-xs text-bad; }
+@utility badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium; }
+@utility table {
+  @apply w-full text-left text-sm;
+  & th { @apply border-b border-line px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-faint; }
+  & td { @apply border-b border-line px-4 py-3 align-top; }
+  & tr:last-child td { @apply border-b-0; }
+}
