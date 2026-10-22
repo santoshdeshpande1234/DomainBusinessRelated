@@ -8,18 +8,18 @@ const ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 const FIELDS = [
   "places.id", "places.displayName", "places.formattedAddress", "places.addressComponents", "places.websiteUri",
   "places.nationalPhoneNumber", "places.googleMapsUri", "places.primaryTypeDisplayName", "places.businessStatus",
-  "places.userRatingCount", "nextPageToken",
+  "places.userRatingCount", "places.rating", "nextPageToken",
 ].join(",");
 export const PLACES_COST_PER_REQUEST_USD = 0.035; // list price, before Google's monthly free allowance
 
 export type Place = {
   id: string; name: string; address: string | null; city: string | null; region: string | null; country: string | null;
-  website: string | null; phone: string | null; mapsUrl: string | null; category: string | null; status: string | null; reviews: number | null;
+  website: string | null; phone: string | null; mapsUrl: string | null; category: string | null; status: string | null; reviews: number | null; rating: number | null;
 };
 
 type Raw = {
   id: string; displayName?: { text: string }; formattedAddress?: string; websiteUri?: string; nationalPhoneNumber?: string;
-  googleMapsUri?: string; primaryTypeDisplayName?: { text: string }; businessStatus?: string; userRatingCount?: number;
+  googleMapsUri?: string; primaryTypeDisplayName?: { text: string }; businessStatus?: string; userRatingCount?: number; rating?: number;
   addressComponents?: { longText: string; types: string[] }[];
 };
 
@@ -29,7 +29,7 @@ export function toPlace(p: Raw): Place {
     id: p.id, name: p.displayName?.text ?? "", address: p.formattedAddress ?? null,
     city: part("locality") ?? part("postal_town"), region: part("administrative_area_level_1"), country: part("country"),
     website: p.websiteUri ?? null, phone: p.nationalPhoneNumber ?? null, mapsUrl: p.googleMapsUri ?? null,
-    category: p.primaryTypeDisplayName?.text ?? null, status: p.businessStatus ?? null, reviews: p.userRatingCount ?? null,
+    category: p.primaryTypeDisplayName?.text ?? null, status: p.businessStatus ?? null, reviews: p.userRatingCount ?? null, rating: p.rating ?? null,
   };
 }
 

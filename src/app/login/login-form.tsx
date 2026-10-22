@@ -28,7 +28,7 @@ export function LoginForm({ next, google, initialError }: { next: string; google
       </div>
 
       {mode === "password" ? (
-        <form onSubmit={onPassword} className="space-y-4">
+        <form method="post" onSubmit={onPassword} className="space-y-4">
           <input type="hidden" name="next" value={next} />
           <div><label className="label" htmlFor="email">Work email</label><input className="input" id="email" name="email" type="email" autoComplete="email" required /></div>
           <div><label className="label" htmlFor="password">Password</label><input className="input" id="password" name="password" type="password" autoComplete="current-password" required /></div>
@@ -38,7 +38,7 @@ export function LoginForm({ next, google, initialError }: { next: string; google
           <Message state={reset} />
         </form>
       ) : (
-        <form onSubmit={onLink} className="space-y-4">
+        <form method="post" onSubmit={onLink} className="space-y-4">
           <input type="hidden" name="next" value={next} />
           <div><label className="label" htmlFor="link-email">Work email</label><input className="input" id="link-email" name="email" type="email" autoComplete="email" required /></div>
           <Message state={link} />

@@ -1,7 +1,7 @@
 # Domain2Revenue AI
 
 Find undervalued domains and local businesses that need a better web presence, and turn the research into
-evidence-backed proposals. Built in phases; Phases 1 and 2 are in this code.
+evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
 
 **Phase 1, foundation**
 - Invite-only sign-in (password, email link, optional Google) with admin / member / viewer roles
@@ -17,6 +17,18 @@ evidence-backed proposals. Built in phases; Phases 1 and 2 are in this code.
   0–100 score, searchable table with filters, select-all, exclusion and CSV export.
 - Every fact is an `evidence` row with its source URL and time. Missing data is shown as missing, never guessed.
 - Long jobs run as short steps the page repeats, so they fit serverless time limits and resume after interruptions.
+
+**Phase 3, opportunity** (per selected prospect)
+- Competitors: from the campaign's own results (free), one Google Maps search (cached, within budget, records the
+  prospect's search position), or by hand. Home pages are checked and compared feature by feature; strengths,
+  competitor advantages, unserved needs and recommendations are labelled as observed facts or assumptions.
+- Financial model: lead-generation or ecommerce formulas in code, each input marked actual / benchmark (with link) /
+  assumption, conservative · base · upside scenarios, ramp-up, lead quality, capacity, seasonality, ROI, payback,
+  hours saved and a running-net chart. Confidence falls as assumptions rise; missing inputs are asked for.
+- Website studio: a templated, responsive concept site from verified facts only (services from the business's own
+  navigation, otherwise highlighted placeholders), four styles and two layouts, SEO metadata and schema.org data.
+  Private staging link at `/preview/<token>`, never indexed; a share link needs "ready" status and can be revoked.
+  No AI copy yet (OpenAI drafting is planned once a key is saved).
 
 Rules the code follows: no fabricated data, nothing is bought, sent or deployed without approval, calculations are
 deterministic code, and every external call is logged with its cost.
@@ -59,9 +71,10 @@ npm test              # unit: validation, exchange rates, encryption, permission
 npm run test:rls      # row-level security against the local Supabase stack
 npm run test:e2e      # Phase 1 browser walkthrough against a running app (see the file header)
 npm run test:e2e:discovery   # Phase 2 walkthrough; external lookups are pre-loaded into the cache
+npm run test:e2e:studio      # Phase 3 walkthrough; prospects and website checks are seeded
 ```
 
 ## Phases
 
-1. Foundation · 2. Domain discovery, prospect research, scoring (this release) · 3. Website previews, competitor
-analysis, financial model · 4. Proposals, PDF, email drafts · 5. Approvals, sending, analytics, hardening
+1. Foundation · 2. Domain discovery, prospect research, scoring · 3. Website previews, competitor analysis,
+financial model (this release) · 4. Proposals, PDF, email drafts · 5. Approvals, sending, analytics, hardening

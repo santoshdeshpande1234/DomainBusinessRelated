@@ -12,6 +12,7 @@
     "test:rls": "vitest run tests/rls",
     "test:e2e": "node tests/e2e/walkthrough.mjs",
     "test:e2e:discovery": "node --env-file=.env.local tests/e2e/discovery.mjs",
+    "test:e2e:studio": "node --env-file=.env.local tests/e2e/studio.mjs",
     "bootstrap-admin": "node --env-file=.env.local scripts/bootstrap-admin.mjs"
   },
   "dependencies": {

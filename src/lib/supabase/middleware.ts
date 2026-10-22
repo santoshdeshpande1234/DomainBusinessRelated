@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 
-const PUBLIC = ["/login", "/auth/"];
+const PUBLIC = ["/login", "/auth/", "/preview/"];
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });

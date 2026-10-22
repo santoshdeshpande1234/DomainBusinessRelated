@@ -21,11 +21,19 @@ export default async function ProspectPage({ params }: { params: Promise<{ id: s
   const { id, prospectId } = await params;
   const s = await getSession();
   const db = await userClient();
-  const [{ data: p }, { data: c }, { data: ev = [] }] = await Promise.all([
+  const [{ data: p }, { data: c }, { data: ev = [] }, { count: comps }, { data: fm }, { data: web }] = await Promise.all([
     db.from("prospects").select("*").eq("id", prospectId).eq("campaign_id", id).maybeSingle(),
     db.from("campaigns").select("name").eq("id", id).maybeSingle(),
     db.from("evidence").select("*").eq("prospect_id", prospectId).order("observed_at", { ascending: false }),
+    db.from("competitors").select("id", { count: "exact", head: true }).eq("prospect_id", prospectId),
+    db.from("financial_models").select("confidence").eq("prospect_id", prospectId).maybeSingle(),
+    db.from("website_previews").select("status, share_enabled").eq("prospect_id", prospectId).maybeSingle(),
   ]);
+  const steps: [string, string, string][] = [
+    ["competitors", "Competitor analysis", comps ? `${comps} competitor(s)` : "Not started"],
+    ["financials", "Financial opportunity", fm ? (fm.confidence != null ? `Calculated, ${fm.confidence}% confidence` : "Inputs needed") : "Not started"],
+    ["website", "Website preview", web ? `${web.status}${web.share_enabled ? ", link shared" : ""}` : "Not started"],
+  ];
   if (!p || !c) notFound();
   const write = can(s.role, "campaign:write");
   const a = p.audit as Audit | null;
@@ -83,6 +91,13 @@ export default async function ProspectPage({ params }: { params: Promise<{ id: s
         </div>
 
         <div className="space-y-6">
+          <Card title="Opportunity work">
+            <div className="space-y-2">{steps.map(([k, label, st]) => (
+              <Link key={k} href={`/campaigns/${id}/prospects/${prospectId}/${k}`} className="card flex items-center justify-between gap-3 px-4 py-3 hover:border-accent">
+                <span className="text-sm font-medium">{label}</span><span className="text-xs text-muted">{st}</span>
+              </Link>
+            ))}</div>
+          </Card>
           <Card title="Score">
             <div className="mb-4 flex items-baseline gap-3"><span className="text-4xl font-semibold tabular-nums">{p.score ?? "—"}</span><span className="text-sm text-muted">/ 100 · {p.confidence ?? 0}% confidence</span><Badge tone={scoreTone(p.score)}>{p.score == null ? "Unscored" : p.score >= 70 ? "Strong" : p.score >= 45 ? "Fair" : "Weak"}</Badge></div>
             <ScoreBreakdown components={(p.score_detail?.components ?? []) as Component[]} flags={p.score_detail?.flags ?? []} />

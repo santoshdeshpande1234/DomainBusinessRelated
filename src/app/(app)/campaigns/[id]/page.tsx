@@ -32,11 +32,13 @@ export default async function CampaignPage({ params, searchParams }: { params: P
   const { data } = await db.from("campaigns").select("*").eq("id", id).maybeSingle();
   if (!data) notFound();
   const c = data as Campaign;
-  const [{ count: domains }, { count: prospects }] = await Promise.all([
-    db.from("domains").select("id", { count: "exact", head: true }).eq("campaign_id", id),
-    db.from("prospects").select("id", { count: "exact", head: true }).eq("campaign_id", id),
+  const n = (table: string) => db.from(table).select("id", { count: "exact", head: true }).eq("campaign_id", id);
+  const [{ count: domains }, { count: prospects }, { count: selected }, { count: competitors }, { count: models }, { count: previews }] = await Promise.all([
+    n("domains"), n("prospects"), n("prospects").eq("status", "selected"), n("competitors"), n("financial_models"), n("website_previews"),
   ]);
-  const counts: Record<string, string> = { domains: `${domains ?? 0} domain${domains === 1 ? "" : "s"}`, prospects: `${prospects ?? 0} prospect${prospects === 1 ? "" : "s"}` };
+  const counts: Record<string, string> = { domains: `${domains ?? 0} domain${domains === 1 ? "" : "s"}`, prospects: `${prospects ?? 0} prospect${prospects === 1 ? "" : "s"}, ${selected ?? 0} selected`,
+    competitors: `${competitors ?? 0} competitor${competitors === 1 ? "" : "s"} tracked`, financials: `${models ?? 0} model${models === 1 ? "" : "s"}`,
+    studio: `${previews ?? 0} preview${previews === 1 ? "" : "s"}` };
   const { data: author } = c.created_by
     ? await db.from("memberships").select("full_name, email").eq("user_id", c.created_by).maybeSingle()
     : { data: null };
