@@ -2,21 +2,29 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { STAGES, type Stage, type StageKey } from "@/lib/studio/compose";
-import { buildPreview, researchPreview } from "./actions";
+import { buildPreview, crawlPreview, researchPreview } from "./actions";
 
 export type RunState = { state: "idle" | "running" | "complete" | "partial" | "failed" | "skipped"; stages: Stage[]; running: StageKey | null; message?: string };
 export const IDLE: RunState = { state: "idle", stages: [], running: null };
 
 /**
- * Runs one prospect's generation as two server steps (research, then build) and reports each stage
+ * Runs one prospect's generation as server steps (research, page reading, then build) and reports each stage
  * as the server finished it. Nothing is shown as done before the server says so.
  */
 export async function runPipeline(campaignId: string, prospectId: string, opts: { mode: "site" | "plan"; refresh: boolean }, update: (r: RunState) => void): Promise<RunState> {
   update({ state: "running", stages: [], running: "context" });
   const a = await researchPreview(campaignId, prospectId, opts.refresh);
   if (a.error) { const r: RunState = { state: "failed", stages: a.stages ?? [], running: null, message: a.error }; update(r); return r; }
-  update({ state: "running", stages: a.stages ?? [], running: "gaps" });
-  const b = await buildPreview(campaignId, prospectId, opts.mode, a.stages);
+  // Read their pages a few at a time until none are left (bounded, in case a site keeps failing).
+  let research = a.stages ?? [];
+  update({ state: "running", stages: research, running: "inventory" });
+  for (let i = 0; i < 6; i++) {
+    const c = await crawlPreview(campaignId, prospectId, opts.refresh && i === 0);
+    research = [...research.filter((s) => s.key !== "inventory"), ...(c.stages ?? [])];
+    update({ state: "running", stages: research, running: c.remaining ? "inventory" : "gaps" });
+    if (c.error || !c.remaining) break;
+  }
+  const b = await buildPreview(campaignId, prospectId, opts.mode, research);
   const stages = b.stages ?? [];
   const r: RunState = { state: b.error ? "failed" : stages.some((s) => s.status === "partial") ? "partial" : "complete", stages, running: null, message: b.error ?? b.ok };
   update(r);

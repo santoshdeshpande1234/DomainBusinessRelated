@@ -6,14 +6,16 @@ const DEVICES = { desktop: { label: "Desktop", width: "100%", icon: Monitor }, t
 type Device = keyof typeof DEVICES;
 
 /** The isolated preview frame with device sizes, the two preview pages, and side-by-side version compare. */
-export function PreviewWorkspace({ token, name, currentSite, hasPlan, versions }: {
+export function PreviewWorkspace({ token, name, currentSite, hasPlan, versions, pages = [] }: {
   token: string; name: string; currentSite: string | null; hasPlan: boolean; versions: { version: number; reason: string; at: string }[];
+  pages?: { slug: string; title: string }[];
 }) {
+  const [page, setPage] = useState("home");
   const [device, setDevice] = useState<Device>("desktop");
   const [view, setView] = useState<"site" | "plan">("site");
   const [compare, setCompare] = useState<number | "">("");
   const [nonce, setNonce] = useState(0);
-  const src = (v?: number) => `/preview/${token}?${new URLSearchParams({ ...(view === "plan" ? { view } : {}), ...(v ? { v: String(v) } : {}), r: String(nonce) })}`;
+  const src = (v?: number) => `/preview/${token}?${new URLSearchParams({ ...(view === "plan" ? { view } : page !== "home" ? { page } : {}), ...(v ? { v: String(v) } : {}), r: String(nonce) })}`;
   const frame = (v?: number) => (
     <div className="overflow-hidden rounded-lg border border-line bg-white" style={{ width: compare ? "100%" : DEVICES[device].width, maxWidth: "100%", marginInline: "auto" }}>
       <iframe key={`${src(v)}-${device}`} src={src(v)} title={`${v ? `Version ${v} of the` : "Current"} ${view === "plan" ? "growth plan" : "website preview"} for ${name}`} className="h-[680px] w-full" />
@@ -31,6 +33,13 @@ export function PreviewWorkspace({ token, name, currentSite, hasPlan, versions }
             <button key={d} type="button" aria-pressed={device === d} aria-label={DEVICES[d].label} title={DEVICES[d].label} onClick={() => setDevice(d)} disabled={!!compare} className={`rounded-md px-2 py-1 disabled:opacity-50 ${device === d ? "bg-accent text-accent-ink" : ""}`}><I className="size-4" aria-hidden /></button>
           ); })}
         </div>
+        {pages.length > 1 && view === "site" && (
+          <label className="flex items-center gap-1.5 text-xs">Page
+            <select value={page} onChange={(e) => setPage(e.target.value)} className="input w-auto py-1 text-xs">
+              {pages.map((p) => <option key={p.slug} value={p.slug}>{p.title}</option>)}
+            </select>
+          </label>
+        )}
         <button type="button" onClick={() => setNonce((n) => n + 1)} className="btn-ghost py-1 text-xs"><RefreshCw className="size-3.5" aria-hidden />Refresh</button>
         {versions.length > 0 && (
           <label className="flex items-center gap-1.5 text-xs">Compare with

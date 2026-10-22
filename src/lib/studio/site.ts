@@ -2,10 +2,11 @@
 // placeholder ("[[...]]") for a member to fill in; a preview can't be marked ready while one remains.
 import type { Audit } from "@/lib/discovery/prospects";
 import type { ClientGrowth, EngineKey } from "./growth";
+import type { SitePage } from "./blueprint";
 
-export type Service = { title: string; text: string; source: "website" | "member" | "placeholder" };
+export type Service = { title: string; text: string; source: "website" | "member" | "placeholder"; slug?: string | null };
 export type SiteContent = {
-  brand: { name: string; eyebrow: string };
+  brand: { name: string; eyebrow: string; logo?: string | null; colors?: { accent: string; ink: string | null } | null };
   meta: { title: string; description: string };
   hero: { headline: string; sub: string; primary_cta: string; secondary_cta: string };
   services: Service[];
@@ -21,6 +22,8 @@ export type SiteContent = {
   assistant?: { greeting: string; answers: { q: string; a: string; keys: string[] }[]; fallback: string };
   finder?: { question: string; options: { need: string; service: string; cta: string }[] };
   sections?: Sections;
+  /** Pages of the proposed website, from the blueprint. Older previews are a single page. */
+  pages?: SitePage[];
 };
 export type Sections = { assistant: boolean; finder: boolean; qualify: boolean; faq: boolean; differentiation: boolean };
 export const SECTION_LABELS: Record<keyof Sections, string> = {

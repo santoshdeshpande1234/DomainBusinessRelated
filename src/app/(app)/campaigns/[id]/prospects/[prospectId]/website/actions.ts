@@ -4,6 +4,9 @@ import { z } from "zod";
 import { requirePerm } from "@/lib/session";
 import { userClient } from "@/lib/supabase/server";
 import { auditWebsite, loadCampaign, rescoreProspects, saveAudit } from "@/lib/discovery/service";
+import { crawlStep } from "@/lib/studio/crawl";
+import { missingInfo, type Inventory } from "@/lib/studio/inventory";
+import type { GrowthPlan } from "@/lib/studio/growth";
 import { INDUSTRIES, labelOf } from "@/lib/options";
 import type { Audit } from "@/lib/discovery/prospects";
 import type { Side } from "@/lib/studio/competitors";
@@ -45,14 +48,16 @@ function siteFacts({ c, p }: Pick<Ctx, "c" | "p">): SiteFacts {
 
 /** Everything one prospect's preview is built from. Queries are scoped to this prospect only. */
 async function gather(x: Pick<Ctx, "db" | "c" | "p">) {
-  const [{ data: comps = [] }, { data: names = [] }] = await Promise.all([
+  const [{ data: comps = [] }, { data: names = [] }, { data: inv }] = await Promise.all([
     x.db.from("competitors").select("name, audit, reviews, rating, website").eq("prospect_id", x.p.id),
     x.db.from("prospects").select("name").eq("campaign_id", x.c.id).neq("id", x.p.id),
+    x.db.from("site_inventories").select("inventory").eq("prospect_id", x.p.id).maybeSingle(),
   ]);
   const competitors: Side[] = comps!.map((k) => ({ name: k.name, audit: k.audit as Audit | null, reviews: k.reviews, rating: k.rating == null ? null : Number(k.rating), hasWebsite: !!k.website }));
   // The client-facing preview must not mention other prospects or this prospect's competitors.
   const others = [...names!.map((n) => n.name), ...competitors.map((k) => k.name)];
-  return { facts: siteFacts(x), reviews: (x.p.score_detail?.reviews as number | undefined) ?? null, competitors, others };
+  const inventory = (inv?.inventory as Inventory | undefined)?.pages ? (inv!.inventory as Inventory) : null;
+  return { facts: siteFacts(x), reviews: (x.p.score_detail?.reviews as number | undefined) ?? null, competitors, others, inventory };
 }
 
 /** Snapshots the current content before it changes. Best effort: a failed snapshot never blocks the edit. */
@@ -111,6 +116,29 @@ export async function researchPreview(campaignId: string, prospectId: string, re
 }
 
 /**
+ * Reads their website page by page (a few pages per call; the caller repeats while pages remain).
+ * Uses the app's own safe fetcher, honours robots.txt, and reuses an inventory under 30 days old.
+ */
+export async function crawlPreview(campaignId: string, prospectId: string, refresh = false): Promise<PipelineResult> {
+  try {
+    const x = await ctx(campaignId, prospectId);
+    if (!x.p.website) return { ok: "No website to read.", stages: [{ key: "inventory", status: "skipped", note: "No website listed; the proposed site starts from the listing and the Growth Plan." }] };
+    const r = await crawlStep(x.db, { workspace_id: x.c.workspace_id, campaign_id: x.c.id, prospect_id: x.p.id, website: x.p.website, userId: x.s.userId }, refresh);
+    const read = r.inventory.pages.filter((p) => p.status === "extracted").length;
+    const failed = r.inventory.pages.filter((p) => p.status !== "extracted").length;
+    const missing = missingInfo(r.inventory);
+    done(campaignId, prospectId);
+    return {
+      ok: r.remaining ? `Read ${r.inventory.pages.length} page(s) so far.` : "Website read.", remaining: r.remaining,
+      stages: [{ key: "inventory", status: r.remaining ? "done" : failed || missing.length ? "partial" : "done",
+        note: `${r.reused ? "Reused the page inventory from the last 30 days. " : ""}${read} page(s) read${failed ? `, ${failed} unreadable` : ""} of ${r.inventory.discovered} discovered${r.inventory.sitemap ? " (sitemap used)" : ""}${r.remaining ? `; ${r.remaining} still queued` : ""}.${missing.length ? ` Not found: ${missing.join(", ")}.` : ""}`.slice(0, 300) }],
+    };
+  } catch (e) {
+    return { error: (e as Error).message, stages: [{ key: "inventory", status: "partial", note: `Pages could not be read (${(e as Error).message}); the home-page check is used instead.`.slice(0, 300) }] };
+  }
+}
+
+/**
  * Stages 3–9: gap analysis, Growth Engines, content, validation and save. "site" rebuilds the whole
  * preview (a version of the old one is kept); "plan" refreshes only the growth layer and keeps text edits.
  */
@@ -121,7 +149,7 @@ export async function buildPreview(campaignId: string, prospectId: string, mode:
     const m = z.enum(["site", "plan"]).parse(mode);
     const input = await gather(x);
     const existing = x.w?.content?.brand ? (x.w.content as SiteContent) : null;
-    const r = compose({ ...input, mode: existing ? m : "site", existing });
+    const r = compose({ ...input, mode: existing ? m : "site", existing, savedPlan: (x.w?.plan as GrowthPlan | null) ?? null });
     if (!r.ok) {
       if (x.w) await x.db.from("website_previews").update({ generation: generation([...prior, ...r.stages]), updated_by: x.s.userId }).eq("id", x.w.id);
       done(campaignId, prospectId);
@@ -132,13 +160,13 @@ export async function buildPreview(campaignId: string, prospectId: string, mode:
     if (x.w) {
       await snapshot(x, m === "plan" ? "Before growth plan refresh" : "Before rebuild");
       const { error } = await x.db.from("website_previews").update({
-        content: r.content, plan: r.plan, generation: generation(stages), updated_by: x.s.userId,
+        content: r.content, plan: r.plan, blueprint: r.blueprint, generation: generation(stages), updated_by: x.s.userId,
         ...(m === "site" || (placeholders && x.w.status === "ready") ? { status: "draft" } : {}),
       }).eq("id", x.w.id);
       if (error) throw new Error(error.message);
     } else {
       const { error } = await x.db.from("website_previews").insert({
-        workspace_id: x.c.workspace_id, campaign_id: x.c.id, prospect_id: x.p.id, content: r.content, plan: r.plan, ...r.design,
+        workspace_id: x.c.workspace_id, campaign_id: x.c.id, prospect_id: x.p.id, content: r.content, plan: r.plan, blueprint: r.blueprint, ...r.design,
         generation: generation(stages), created_by: x.s.userId, updated_by: x.s.userId,
       });
       if (error) throw new Error(error.message);
@@ -193,7 +221,7 @@ async function buildPreviewFocus(x: Ctx, key: EngineKey): Promise<StepResult> {
   const r = compose({ ...input, mode: "plan", existing: x.w!.content as SiteContent, focus: key });
   if (!r.ok) return { error: r.error };
   await snapshot(x, "Before engine priority change");
-  const { error } = await x.db.from("website_previews").update({ content: r.content, plan: r.plan, updated_by: x.s.userId }).eq("id", x.w!.id);
+  const { error } = await x.db.from("website_previews").update({ content: r.content, plan: r.plan, blueprint: r.blueprint, updated_by: x.s.userId }).eq("id", x.w!.id);
   if (error) throw new Error(error.message);
   return { ok: `${r.plan.engines.find((e) => e.key === key)?.name ?? "Engine"} is now the lead engine.` };
 }
@@ -253,7 +281,7 @@ export async function saveContent(campaignId: string, prospectId: string, _: Ste
     const services = lines(d.services, 9).map((l) => {
       const [title, ...rest] = l.split("|");
       const prev = old.services.find((x) => x.title === title.trim());
-      return { title: title.trim(), text: rest.join("|").trim(), source: prev && prev.source !== "placeholder" ? prev.source : /\[\[/.test(title) ? "placeholder" : "member" } as const;
+      return { title: title.trim(), text: rest.join("|").trim(), slug: prev?.slug ?? null, source: prev && prev.source !== "placeholder" ? prev.source : /\[\[/.test(title) ? "placeholder" : "member" } as const;
     });
     if (!services.length) return { error: "Add at least one service." };
     const content: SiteContent = {

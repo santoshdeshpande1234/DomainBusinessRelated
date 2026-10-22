@@ -177,9 +177,13 @@ describe.skipIf(!up)("row-level security", () => {
     expect(web.data!.token).toMatch(/^[0-9a-f]{64}$/);
     expect(web.data!.share_enabled).toBe(false);
 
+    const inv = await member.from("site_inventories").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p, inventory: { pages: [] } }).select("id").single();
+    expect(inv.error).toBeNull();
+    expect((await other.from("site_inventories").insert({ workspace_id: B, campaign_id: campaignA, prospect_id: p })).error?.message).toMatch(/does not belong/);
+
     // Other workspace and anonymous visitors see none of it; the browser cannot read previews by token.
     const anon = createClient(URL, ANON, opts);
-    for (const t of ["competitors", "financial_models", "website_previews"]) {
+    for (const t of ["competitors", "financial_models", "website_previews", "site_inventories"]) {
       expect((await other.from(t).select("*")).data, t).toEqual([]);
       expect((await anon.from(t).select("*")).data ?? [], t).toEqual([]);
     }
