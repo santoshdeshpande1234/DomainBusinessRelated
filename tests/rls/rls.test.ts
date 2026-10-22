@@ -135,4 +135,34 @@ describe.skipIf(!up)("row-level security", () => {
     const stranger = await login((await user("stranger")).email);
     expect((await stranger.rpc("accept_invite")).data).toBeNull();
   });
+  it("domains, prospects and evidence stay in their workspace", async () => {
+    const dom = await member.from("domains").insert({ workspace_id: A, campaign_id: campaignA, name: `dental${run}.in`, tld: ".in", origin: "manual", created_by: u.member.id }).select("id").single();
+    expect(dom.error).toBeNull();
+    const pro = await member.from("prospects").insert({ workspace_id: A, campaign_id: campaignA, name: "Smile Dental", origin: "manual", dedupe_key: "smiledental|pune" }).select("id").single();
+    expect(pro.error).toBeNull();
+    expect((await member.from("evidence").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: pro.data!.id, kind: "manual", label: "x", source_name: "test", created_by: u.member.id })).error).toBeNull();
+
+    // Other workspace: cannot see, write into, or point rows at this campaign.
+    for (const t of ["domains", "prospects", "evidence"]) expect((await other.from(t).select("*")).data, t).toEqual([]);
+    expect((await other.from("domains").insert({ workspace_id: B, campaign_id: campaignA, name: `x${run}.com`, tld: ".com", origin: "manual" })).error?.message).toMatch(/does not belong/);
+    expect((await other.from("prospects").update({ name: "hijack" }).eq("id", pro.data!.id).select()).data ?? []).toEqual([]);
+
+    // Viewers read only; evidence is append-only and attributed.
+    expect((await viewer.from("domains").select("id")).data!.length).toBe(1);
+    expect((await viewer.from("domains").update({ status: "approved" }).eq("id", dom.data!.id).select()).data ?? []).toEqual([]);
+    expect((await viewer.from("prospects").insert({ workspace_id: A, campaign_id: campaignA, name: "V", origin: "manual", dedupe_key: "v|" })).error).not.toBeNull();
+    expect((await member.from("evidence").update({ label: "edited" }).eq("prospect_id", pro.data!.id)).error).not.toBeNull();
+    expect((await member.from("evidence").insert({ workspace_id: A, campaign_id: campaignA, domain_id: dom.data!.id, kind: "x", label: "x", source_name: "x", created_by: u.admin.id })).error).not.toBeNull();
+    expect((await member.from("domains").update({ campaign_id: campaignA, workspace_id: B }).eq("id", dom.data!.id)).error).not.toBeNull();
+
+    // Duplicates are rejected by the database too; status decisions are audited.
+    expect((await member.from("domains").insert({ workspace_id: A, campaign_id: campaignA, name: `dental${run}.in`, tld: ".in", origin: "manual" })).error).not.toBeNull();
+    expect((await member.from("prospects").insert({ workspace_id: A, campaign_id: campaignA, name: "Smile Dental", origin: "manual", dedupe_key: "smiledental|pune" })).error).not.toBeNull();
+    await member.from("domains").update({ status: "approved", updated_by: u.member.id }).eq("id", dom.data!.id);
+    const log = await admin.from("audit_logs").select("action, actor_email, detail").eq("resource_id", dom.data!.id);
+    expect(log.data).toEqual([{ action: "domains.update", actor_email: u.member.email, detail: expect.objectContaining({ status: "approved", from_status: "candidate" }) }]);
+
+    // The research cache is server-only.
+    expect((await admin.from("research_cache").select("*")).error).not.toBeNull();
+  });
 });

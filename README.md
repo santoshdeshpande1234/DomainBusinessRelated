@@ -1,12 +1,22 @@
 # Domain2Revenue AI
 
 Find undervalued domains and local businesses that need a better web presence, and turn the research into
-evidence-backed proposals. Built in phases; **Phase 1** (this code) is the foundation:
+evidence-backed proposals. Built in phases; Phases 1 and 2 are in this code.
 
+**Phase 1, foundation**
 - Invite-only sign-in (password, email link, optional Google) with admin / member / viewer roles
 - Campaign wizard (industry, market, objectives, budgets, extensions, limits, pricing) with an exchange-rate snapshot
 - Workspace settings, team invites, encrypted integration keys, API usage and an audit log
-- Dashboard with setup checklist; later modules are shown as locked
+
+**Phase 2, discovery** (per campaign)
+- Domains: ideas from industry words × location × extensions, registry status from RDAP (free, keyless), manual
+  price checks and comparable sales with source links, 0–100 score with a visible breakdown and confidence,
+  valuation and ROI only from sourced comparables, shortlist (with the campaign limit), compare, approve. Never buys.
+- Prospects: Google Places search (paged, cached 24 h, stopped at the campaign's prospect budget), CSV import with
+  duplicate detection, the app's own home-page check (HTTPS, mobile viewport, forms, booking, calls to action…),
+  0–100 score, searchable table with filters, select-all, exclusion and CSV export.
+- Every fact is an `evidence` row with its source URL and time. Missing data is shown as missing, never guessed.
+- Long jobs run as short steps the page repeats, so they fit serverless time limits and resume after interruptions.
 
 Rules the code follows: no fabricated data, nothing is bought, sent or deployed without approval, calculations are
 deterministic code, and every external call is logged with its cost.
@@ -45,12 +55,13 @@ npm run dev                        # http://localhost:3000
 
 ```bash
 npm run lint && npm run typecheck
-npm test              # unit: validation, exchange rates, encryption, permissions
+npm test              # unit: validation, exchange rates, encryption, permissions, scoring, parsing
 npm run test:rls      # row-level security against the local Supabase stack
-npm run test:e2e      # browser walkthrough against a running app (see the file header)
+npm run test:e2e      # Phase 1 browser walkthrough against a running app (see the file header)
+npm run test:e2e:discovery   # Phase 2 walkthrough; external lookups are pre-loaded into the cache
 ```
 
 ## Phases
 
-1. Foundation (this release) · 2. Domain discovery, prospect research, scoring · 3. Website previews, competitor
+1. Foundation · 2. Domain discovery, prospect research, scoring (this release) · 3. Website previews, competitor
 analysis, financial model · 4. Proposals, PDF, email drafts · 5. Approvals, sending, analytics, hardening

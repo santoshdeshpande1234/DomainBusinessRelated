@@ -51,6 +51,9 @@ export const PROVIDERS: Provider[] = [
     fields: [{ name: "api_key", label: "API key", secret: true }, { name: "from_email", label: "Verified sender address", secret: false }] },
 ];
 
+// Modules up to this phase are built; later ones show as "coming next".
+export const LIVE_PHASE = 2;
+
 export const MODULES = [
   { key: "domains", label: "Domain discovery", phase: 2, text: "Score candidate domains with registry availability, pricing and evidence. Nothing is ever bought automatically." },
   { key: "prospects", label: "Prospect research", phase: 2, text: "Find real businesses, audit their websites and keep every fact with its source." },
