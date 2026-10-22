@@ -165,4 +165,40 @@ describe.skipIf(!up)("row-level security", () => {
     // The research cache is server-only.
     expect((await admin.from("research_cache").select("*")).error).not.toBeNull();
   });
+
+  it("competitors, financial models and previews stay with their prospect and workspace", async () => {
+    const pro = await member.from("prospects").insert({ workspace_id: A, campaign_id: campaignA, name: "Ortho Care", origin: "manual", dedupe_key: `orthocare${run}|` }).select("id").single();
+    expect(pro.error).toBeNull();
+    const p = pro.data!.id;
+    expect((await member.from("competitors").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p, name: "Rival", origin: "manual" })).error).toBeNull();
+    expect((await member.from("financial_models").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p, inputs: { visits: { value: 1, basis: "actual" } } })).error).toBeNull();
+    const web = await member.from("website_previews").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p, content: { brand: { name: "Ortho Care" } } }).select("id, token, share_enabled").single();
+    expect(web.error).toBeNull();
+    expect(web.data!.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(web.data!.share_enabled).toBe(false);
+
+    // Other workspace and anonymous visitors see none of it; the browser cannot read previews by token.
+    const anon = createClient(URL, ANON, opts);
+    for (const t of ["competitors", "financial_models", "website_previews"]) {
+      expect((await other.from(t).select("*")).data, t).toEqual([]);
+      expect((await anon.from(t).select("*")).data ?? [], t).toEqual([]);
+    }
+    expect((await other.from("website_previews").insert({ workspace_id: B, campaign_id: campaignA, prospect_id: p })).error?.message).toMatch(/does not belong/);
+    expect((await other.from("website_previews").update({ share_enabled: true }).eq("id", web.data!.id).select()).data ?? []).toEqual([]);
+
+    // A child must sit in its prospect's campaign, and a proposed domain must come from the same campaign.
+    const c2 = await member.from("campaigns").insert(campaign(A, u.member.id, "Second")).select("id").single();
+    expect((await member.from("competitors").insert({ workspace_id: A, campaign_id: c2.data!.id, prospect_id: p, name: "X", origin: "manual" })).error?.message).toMatch(/prospect does not belong/);
+    const d2 = await member.from("domains").insert({ workspace_id: A, campaign_id: c2.data!.id, name: `other${run}.com`, tld: ".com", origin: "manual" }).select("id").single();
+    expect((await member.from("website_previews").update({ domain_id: d2.data!.id }).eq("id", web.data!.id)).error?.message).toMatch(/domain does not belong/);
+
+    // Viewers read only; sharing changes are audited; a shared link can't be swapped silently.
+    expect((await viewer.from("website_previews").select("id")).data!.length).toBe(1);
+    expect((await viewer.from("website_previews").update({ share_enabled: true }).eq("id", web.data!.id).select()).data ?? []).toEqual([]);
+    expect((await viewer.from("financial_models").update({ inputs: {} }).eq("prospect_id", p).select()).data ?? []).toEqual([]);
+    await member.from("website_previews").update({ status: "ready", share_enabled: true, updated_by: u.member.id }).eq("id", web.data!.id);
+    expect((await member.from("website_previews").update({ token: "f".repeat(64) }).eq("id", web.data!.id)).error?.message).toMatch(/turn sharing off/);
+    const log = await admin.from("audit_logs").select("action, detail").eq("resource_id", web.data!.id).eq("action", "website_previews.update");
+    expect(log.data![0].detail).toEqual(expect.objectContaining({ status: "ready", changed: expect.arrayContaining(["share_enabled"]) }));
+  });
 });

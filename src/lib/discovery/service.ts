@@ -3,7 +3,8 @@ import { userClient } from "@/lib/supabase/server";
 import type { Campaign } from "@/lib/types";
 import { industryKeywords, searchTerms } from "./keywords";
 import { scoreDomain } from "./domains";
-import { scoreProspect, type Audit } from "./prospects";
+import { parseAudit, scoreProspect, type Audit } from "./prospects";
+import { fetchPublicPage } from "./net";
 
 type Db = Awaited<ReturnType<typeof userClient>>;
 
@@ -65,4 +66,15 @@ export function prospectBudgetUsd(c: Campaign) {
   const budget = Number(c.prospect_budget) * Number(c.fx.usd_per_unit);
   const cap = c.limits?.max_api_spend_usd;
   return cap != null ? Math.min(budget, Number(cap)) : budget;
+}
+
+/** Loads and parses one home page with the safe fetcher. Failures come back as an audit with an error. */
+export async function auditWebsite(url: string): Promise<Audit> {
+  try {
+    const page = await fetchPublicPage(url, { timeoutMs: 6000 });
+    return parseAudit({ url, finalUrl: page.finalUrl, status: page.status, html: page.html, ms: page.ms, bytes: page.bytes });
+  } catch (e) {
+    const msg = (e as Error).name === "TimeoutError" ? "timed out" : (e as Error).message.slice(0, 120);
+    return { url, final_url: url, error: msg } as Audit;
+  }
 }

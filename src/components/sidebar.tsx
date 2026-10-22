@@ -2,7 +2,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Activity, Building2, FolderKanban, Globe, KeyRound, LayoutDashboard, Lock, Menu, ScrollText, Settings, UserRound, Users, X } from "lucide-react";
+import { Activity, BarChart3, Building2, FolderKanban, Globe, LayoutTemplate, Swords, KeyRound, LayoutDashboard, Lock, Menu, ScrollText, Settings, UserRound, Users, X } from "lucide-react";
+
+const ICONS: Record<string, React.ElementType> = { domains: Globe, prospects: Building2, competitors: Swords, financials: BarChart3, studio: LayoutTemplate };
 
 type Item = { href: string; label: string; icon: React.ElementType; locked?: boolean };
 
@@ -16,7 +18,7 @@ export function Sidebar({ workspace, user, role, showAudit, modules }: {
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
       { href: "/campaigns", label: "Campaigns", icon: FolderKanban },
     ]],
-    ["Research", modules.filter((m) => m.live).map((m) => ({ href: `/modules/${m.key}`, label: m.label, icon: m.key === "domains" ? Globe : Building2 }))],
+    ["Workflow", modules.filter((m) => m.live).map((m) => ({ href: `/modules/${m.key}`, label: m.label, icon: ICONS[m.key] ?? Building2 }))],
     ["Coming next", modules.filter((m) => !m.live).map((m) => ({ href: `/modules/${m.key}`, label: m.label, icon: Lock, locked: true }))],
     ["Workspace", [
       { href: "/settings", label: "Settings", icon: Settings },

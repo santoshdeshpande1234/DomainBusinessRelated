@@ -52,13 +52,14 @@ export const PROVIDERS: Provider[] = [
 ];
 
 // Modules up to this phase are built; later ones show as "coming next".
-export const LIVE_PHASE = 2;
+export const LIVE_PHASE = 3;
 
 export const MODULES = [
   { key: "domains", label: "Domain discovery", phase: 2, text: "Score candidate domains with registry availability, pricing and evidence. Nothing is ever bought automatically." },
   { key: "prospects", label: "Prospect research", phase: 2, text: "Find real businesses, audit their websites and keep every fact with its source." },
-  { key: "studio", label: "Website studio", phase: 3, text: "Tailored website previews on private staging links, with no invented claims." },
+  { key: "competitors", label: "Competitor analysis", phase: 3, text: "Compare each prospect's website with nearby competitors, with sources and dates." },
   { key: "financials", label: "Financial opportunity", phase: 3, text: "Code-based scenarios for revenue, profit, ROI and payback with visible assumptions." },
+  { key: "studio", label: "Website studio", phase: 3, text: "Tailored website previews on private staging links, with no invented claims." },
   { key: "proposals", label: "Proposals & PDF", phase: 4, text: "One consulting-quality template filled with each prospect's research." },
   { key: "outreach", label: "Email approval", phase: 5, text: "Personalised drafts you approve, with opt-outs, limits and tracking." },
 ] as const;

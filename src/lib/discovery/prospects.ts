@@ -30,10 +30,16 @@ export type Audit = {
   title: string | null; description: string | null; viewport: boolean; h1: number;
   forms: number; booking: boolean; cta: string[]; tel: boolean; emails: string[]; schema: boolean;
   copyright_year: number | null; generator: string | null; error?: string;
+  // Added in Phase 3; older audits don't have them.
+  nav?: string[]; headings?: string[]; pricing?: boolean;
 };
 
 const BOOKING = /\b(book (an? )?(appointment|table|now|online|consultation)|schedule (a|an|your)|appointment|calendly\.com|reserve (a|now)|booking)\b/i;
 const CTAS = ["contact us", "get a quote", "request a quote", "free quote", "call now", "book now", "get started", "enquire", "inquire", "request a callback", "whatsapp"];
+
+// Navigation labels that say nothing about what a business offers.
+const GENERIC_NAV = /^(home|about( us)?|contact( us)?|blog|news|login|log in|sign in|sign up|register|careers|jobs|privacy( policy)?|terms.*|faq|faqs|search|menu|cart|account|my account|gallery|team|our team|testimonials|reviews|more|english|en|skip to content|\W*)$/i;
+const PRICE = /[$£€₹]\s?\d|\b(?:rs\.?|inr|usd|aed|sgd)\s?\d|\bpricing\b|\bprices?\b(?! on request)/i;
 
 const strip = (s: string) => s.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 
@@ -59,6 +65,10 @@ export function parseAudit(input: { url: string; finalUrl: string; status: numbe
     schema: /application\/ld\+json/i.test(h),
     copyright_year: years.length ? Math.max(...years) : null,
     generator: meta("generator")?.slice(0, 80) ?? null,
+    nav: [...new Set([...(h.match(/<nav[\s\S]*?<\/nav>/gi) ?? []).join(" ").matchAll(/<a[^>]*>([\s\S]*?)<\/a>/gi)]
+      .map((m) => strip(m[1])).filter((t) => t.length >= 3 && t.length <= 40 && !GENERIC_NAV.test(t)))].slice(0, 12),
+    headings: [...h.matchAll(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi)].map((m) => strip(m[1])).filter((t) => t.length >= 3 && t.length <= 80).slice(0, 10),
+    pricing: PRICE.test(text),
   };
 }
 

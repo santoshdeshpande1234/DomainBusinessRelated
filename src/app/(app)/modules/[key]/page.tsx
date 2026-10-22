@@ -20,7 +20,11 @@ export default async function ModulePage({ params }: { params: Promise<{ key: st
   if (m.phase <= LIVE_PHASE) {
     // Live modules work per campaign: pick one.
     const db = await userClient();
-    const table = key === "domains" ? "domains" : "prospects";
+    const TABLE: Record<string, [string, string]> = {
+      domains: ["domains", "domains"], prospects: ["prospects", "prospects"], competitors: ["competitors", "competitors"],
+      financials: ["financial_models", "models"], studio: ["website_previews", "previews"],
+    };
+    const [table, noun] = TABLE[key];
     const [{ data: campaigns = [] }, { data: items = [] }] = await Promise.all([
       db.from("campaigns").select("id, name, status").neq("status", "archived").order("updated_at", { ascending: false }).limit(200),
       db.from(table).select("campaign_id").limit(10000),
@@ -35,7 +39,7 @@ export default async function ModulePage({ params }: { params: Promise<{ key: st
               {campaigns!.map((c) => (
                 <li key={c.id} className="flex items-center justify-between gap-3 py-3">
                   <Link href={`/campaigns/${c.id}/${key}`} className="min-w-0 truncate text-sm font-medium hover:text-accent">{c.name}</Link>
-                  <span className="flex shrink-0 items-center gap-3 text-xs text-faint">{count(c.id)} {key === "domains" ? "domains" : "prospects"}<Badge tone={STATUS_TONE[c.status]}>{title(c.status)}</Badge></span>
+                  <span className="flex shrink-0 items-center gap-3 text-xs text-faint">{count(c.id)} {noun}<Badge tone={STATUS_TONE[c.status]}>{title(c.status)}</Badge></span>
                 </li>
               ))}
             </ul>

@@ -6,9 +6,9 @@ import { userClient } from "@/lib/supabase/server";
 import { getCredentials, markIntegration } from "@/lib/integrations";
 import { searchTerms } from "@/lib/discovery/keywords";
 import { PLACES_COST_PER_REQUEST_USD, langCode, searchPlaces } from "@/lib/discovery/places";
-import { campaignSpendUsd, fetchPublicPage } from "@/lib/discovery/net";
-import { EMAIL_RE, csvRecords, dedupeKey, normalizeWebsite, opportunities, parseAudit, parseCsv } from "@/lib/discovery/prospects";
-import { loadCampaign, prospectBudgetUsd, rescoreProspects } from "@/lib/discovery/service";
+import { campaignSpendUsd } from "@/lib/discovery/net";
+import { EMAIL_RE, csvRecords, dedupeKey, normalizeWebsite, opportunities, parseCsv } from "@/lib/discovery/prospects";
+import { auditWebsite, loadCampaign, prospectBudgetUsd, rescoreProspects } from "@/lib/discovery/service";
 import type { StepResult } from "../domains/actions";
 
 const fail = (e: unknown): StepResult => ({ error: (e as Error).message });
@@ -25,7 +25,7 @@ type Db = Awaited<ReturnType<typeof userClient>>;
 type NewProspect = {
   name: string; category?: string | null; address?: string | null; city?: string | null; region?: string | null; country?: string | null;
   website?: string | null; phone?: string | null; email?: string | null; contact_name?: string | null; contact_role?: string | null; notes?: string | null;
-  origin: "google_places" | "csv" | "manual"; origin_ref?: string | null; origin_url?: string | null; listing?: { status: string | null; reviews: number | null };
+  origin: "google_places" | "csv" | "manual"; origin_ref?: string | null; origin_url?: string | null; listing?: { status: string | null; reviews: number | null; rating?: number | null };
 };
 
 /** Inserts prospects that are not already in the campaign (same place id, website host, or name + city). */
@@ -52,7 +52,7 @@ async function insertNew(db: Db, c: { id: string; workspace_id: string; max_pros
   if (!rows.length) return { added: 0, dupes, full: room === 0 };
   const { data, error } = await db.from("prospects").insert(rows.map(({ listing, ...r }) => ({
     ...r, workspace_id: c.workspace_id, campaign_id: c.id, created_by: userId, updated_by: userId,
-    score_detail: listing ? { listing_status: listing.status, reviews: listing.reviews } : {},
+    score_detail: listing ? { listing_status: listing.status, reviews: listing.reviews, rating: listing.rating ?? null } : {},
   }))).select("id, name, website, phone, email, city, address, origin_url, contact_name");
   if (error) throw new Error(error.message);
   const ev = data!.map((p, i) => ({ ...evidence(rows[i]), workspace_id: c.workspace_id, campaign_id: c.id, prospect_id: p.id, kind: "listing", created_by: userId }));
@@ -92,7 +92,7 @@ export async function searchProspects(campaignId: string): Promise<StepResult> {
     const now = new Date().toISOString();
     const r = await insertNew(db, c, s.userId, value.places.map((p) => ({
       name: p.name, category: p.category, address: p.address, city: p.city, region: p.region, country: p.country, website: p.website, phone: p.phone,
-      origin: "google_places" as const, origin_ref: p.id, origin_url: p.mapsUrl, listing: { status: p.status, reviews: p.reviews },
+      origin: "google_places" as const, origin_ref: p.id, origin_url: p.mapsUrl, listing: { status: p.status, reviews: p.reviews, rating: p.rating },
     })), (p) => ({
       label: "Business listing", source_name: "Google Maps", source_url: p.origin_url ?? null,
       value: [p.name, p.address, p.phone, p.website && `website ${p.website}`, p.listing?.reviews != null && `${p.listing.reviews} reviews`, p.listing?.status && p.listing.status !== "OPERATIONAL" && p.listing.status.toLowerCase().replace(/_/g, " ")].filter(Boolean).join(" · "),
@@ -132,15 +132,7 @@ export async function auditProspects(campaignId: string): Promise<StepResult> {
     const { s, db, c } = await ctx(campaignId);
     const { data: batch } = await db.from("prospects").select("id, website, email").eq("campaign_id", c.id).not("website", "is", null)
       .is("audited_at", null).neq("status", "excluded").order("score", { ascending: false, nullsFirst: false }).limit(4);
-    const results = await Promise.all((batch ?? []).map(async (p) => {
-      try {
-        const page = await fetchPublicPage(p.website!, { timeoutMs: 6000 });
-        return { p, a: parseAudit({ url: p.website!, finalUrl: page.finalUrl, status: page.status, html: page.html, ms: page.ms, bytes: page.bytes }) };
-      } catch (e) {
-        const msg = (e as Error).name === "TimeoutError" ? "timed out" : (e as Error).message.slice(0, 120);
-        return { p, a: { url: p.website!, final_url: p.website!, error: msg } as ReturnType<typeof parseAudit> };
-      }
-    }));
+    const results = await Promise.all((batch ?? []).map(async (p) => ({ p, a: await auditWebsite(p.website!) })));
     const now = new Date().toISOString();
     for (const { p, a } of results) {
       const found = !p.email && a.emails?.[0];

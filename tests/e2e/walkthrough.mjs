@@ -77,7 +77,7 @@ await shot("10-settings"); step("settings validation + save");
 await page.goto(B + "/audit"); await page.getByText("campaigns.insert").first().waitFor(); await page.getByText(/integrations\.(insert|update)/).first().waitFor();
 await shot("11-audit"); step("audit log");
 await page.goto(B + "/usage"); await shot("12-usage");
-await page.goto(B + "/modules/studio"); await page.getByText("Arrives in Phase 3").waitFor(); step("locked module");
+await page.goto(B + "/modules/proposals"); await page.getByText("Arrives in Phase 4").waitFor(); step("locked module");
 
 await page.setViewportSize({ width: 390, height: 844 }); await page.goto(B + `/campaigns/${id}`); await shot("13-mobile-detail");
 await page.click("[aria-label='Open menu']"); await shot("14-mobile-menu");
