@@ -10,3 +10,8 @@ export async function getCredentials(workspaceId: string, provider: string): Pro
   const secrets = JSON.parse(decrypt(data.secret, serverEnv("ENCRYPTION_KEY"))) as Record<string, string>;
   return { ...(data.hint as Record<string, string>), ...secrets };
 }
+
+/** Records whether a provider's credentials worked the last time they were used. */
+export async function markIntegration(workspaceId: string, provider: string, status: "verified" | "failed") {
+  await adminClient().from("integrations").update({ status }).eq("workspace_id", workspaceId).eq("provider", provider).neq("status", status);
+}

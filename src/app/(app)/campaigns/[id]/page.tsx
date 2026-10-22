@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Badge, Card, Dl, LockedModule, Notice, PageHeader, STATUS_TONE } from "@/components/ui";
 import { Submit } from "@/components/submit";
 import { getSession } from "@/lib/session";
 import { can } from "@/lib/permissions";
 import { userClient } from "@/lib/supabase/server";
-import { INDUSTRIES, MODULES, OBJECTIVES, labelOf } from "@/lib/options";
+import { INDUSTRIES, LIVE_PHASE, MODULES, OBJECTIVES, labelOf } from "@/lib/options";
 import { money, num, title, when } from "@/lib/format";
 import type { Campaign } from "@/lib/types";
 import { deleteCampaign, setCampaignStatus } from "../actions";
@@ -31,6 +32,11 @@ export default async function CampaignPage({ params, searchParams }: { params: P
   const { data } = await db.from("campaigns").select("*").eq("id", id).maybeSingle();
   if (!data) notFound();
   const c = data as Campaign;
+  const [{ count: domains }, { count: prospects }] = await Promise.all([
+    db.from("domains").select("id", { count: "exact", head: true }).eq("campaign_id", id),
+    db.from("prospects").select("id", { count: "exact", head: true }).eq("campaign_id", id),
+  ]);
+  const counts: Record<string, string> = { domains: `${domains ?? 0} domain${domains === 1 ? "" : "s"}`, prospects: `${prospects ?? 0} prospect${prospects === 1 ? "" : "s"}` };
   const { data: author } = c.created_by
     ? await db.from("memberships").select("full_name, email").eq("user_id", c.created_by).maybeSingle()
     : { data: null };
@@ -57,7 +63,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           </>
         )}
       />
-      {sp.created && <div className="mb-6"><Notice tone="good">Campaign created as a draft. Activate it when you&apos;re ready; discovery arrives in Phase 2.</Notice></div>}
+      {sp.created && <div className="mb-6"><Notice tone="good">Campaign created as a draft. Next, open Domain discovery or Prospect research below.</Notice></div>}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -93,8 +99,13 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         </div>
 
         <div className="space-y-6">
-          <Card title="Pipeline" description="Each stage unlocks as its phase ships.">
-            <div className="space-y-2">{MODULES.map((m) => <LockedModule key={m.key} label={m.label} phase={m.phase} text={m.text} />)}</div>
+          <Card title="Pipeline" description="Open a stage to work on it. Later stages unlock as they ship.">
+            <div className="space-y-2">{MODULES.map((m) => m.phase <= LIVE_PHASE ? (
+              <Link key={m.key} href={`/campaigns/${c.id}/${m.key}`} className="card flex items-center justify-between gap-3 px-4 py-3.5 hover:border-accent">
+                <span><span className="block text-sm font-medium">{m.label}</span><span className="block text-xs text-muted">{counts[m.key]}</span></span>
+                <ArrowRight className="size-4 text-faint" aria-hidden />
+              </Link>
+            ) : <LockedModule key={m.key} label={m.label} phase={m.phase} text={m.text} />)}</div>
           </Card>
           <Card title="Details">
             <Dl items={[["Created by", author?.full_name || author?.email || "—"], ["Created", when(c.created_at)], ["Last updated", when(c.updated_at)]]} />

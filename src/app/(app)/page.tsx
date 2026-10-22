@@ -4,7 +4,7 @@ import { Badge, Card, Empty, LockedModule, PageHeader, STATUS_TONE, Stat } from 
 import { getSession } from "@/lib/session";
 import { can } from "@/lib/permissions";
 import { userClient } from "@/lib/supabase/server";
-import { MODULES, PROVIDERS } from "@/lib/options";
+import { LIVE_PHASE, MODULES, PROVIDERS } from "@/lib/options";
 import { money, num, title, when } from "@/lib/format";
 
 export const metadata = { title: "Dashboard" };
@@ -65,7 +65,7 @@ export default async function Dashboard() {
             )}
           </Card>
           <Card title="What's coming" description="Each module unlocks in its phase and builds on your campaigns.">
-            <div className="grid gap-2 sm:grid-cols-2">{MODULES.map((m) => <LockedModule key={m.key} label={m.label} phase={m.phase} text={m.text} />)}</div>
+            <div className="grid gap-2 sm:grid-cols-2">{MODULES.filter((m) => m.phase > LIVE_PHASE).map((m) => <LockedModule key={m.key} label={m.label} phase={m.phase} text={m.text} />)}</div>
           </Card>
         </div>
         <Card title="Get set up" description={`${setupDone} of ${setup.length} done`}>
