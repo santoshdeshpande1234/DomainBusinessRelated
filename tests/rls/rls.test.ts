@@ -200,5 +200,15 @@ describe.skipIf(!up)("row-level security", () => {
     expect((await member.from("website_previews").update({ token: "f".repeat(64) }).eq("id", web.data!.id)).error?.message).toMatch(/turn sharing off/);
     const log = await admin.from("audit_logs").select("action, detail").eq("resource_id", web.data!.id).eq("action", "website_previews.update");
     expect(log.data![0].detail).toEqual(expect.objectContaining({ status: "ready", changed: expect.arrayContaining(["share_enabled"]) }));
+
+    // Versions: members snapshot their own workspace's previews; nobody edits a snapshot or crosses campaigns.
+    const ver = { workspace_id: A, campaign_id: campaignA, preview_id: web.data!.id, version: 1, reason: "Before rebuild", content: { brand: { name: "Ortho Care" } }, theme: "harbor", layout: "split" };
+    expect((await member.from("website_preview_versions").insert({ ...ver, created_by: u.member.id })).error).toBeNull();
+    expect((await member.from("website_preview_versions").insert({ ...ver, version: 2, campaign_id: c2.data!.id, created_by: u.member.id })).error?.message).toMatch(/does not belong/);
+    expect((await viewer.from("website_preview_versions").insert({ ...ver, version: 3, created_by: u.viewer.id })).error).not.toBeNull();
+    expect((await viewer.from("website_preview_versions").select("version")).data!.length).toBe(1);
+    expect((await other.from("website_preview_versions").select("*")).data).toEqual([]);
+    expect((await anon.from("website_preview_versions").select("*")).data ?? []).toEqual([]);
+    expect((await member.from("website_preview_versions").update({ reason: "changed" }).eq("preview_id", web.data!.id)).error).not.toBeNull();
   });
 });

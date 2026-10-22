@@ -3,7 +3,7 @@ import { userClient } from "@/lib/supabase/server";
 import type { Campaign } from "@/lib/types";
 import { industryKeywords, searchTerms } from "./keywords";
 import { scoreDomain } from "./domains";
-import { parseAudit, scoreProspect, type Audit } from "./prospects";
+import { opportunities, parseAudit, scoreProspect, type Audit } from "./prospects";
 import { fetchPublicPage } from "./net";
 
 type Db = Awaited<ReturnType<typeof userClient>>;
@@ -77,4 +77,19 @@ export async function auditWebsite(url: string): Promise<Audit> {
     const msg = (e as Error).name === "TimeoutError" ? "timed out" : (e as Error).message.slice(0, 120);
     return { url, final_url: url, error: msg } as Audit;
   }
+}
+
+/** Saves a website check on a prospect with its evidence row (and a public email found on the page). */
+export async function saveAudit(db: Db, c: Pick<Campaign, "id" | "workspace_id">, userId: string, p: { id: string; email: string | null }, a: Audit) {
+  const now = new Date().toISOString();
+  const found = !p.email && a.emails?.[0];
+  await db.from("prospects").update({ audit: a, audited_at: now, updated_by: userId, ...(found ? { email: a.emails[0] } : {}) }).eq("id", p.id);
+  const opps = opportunities(a, true);
+  const ev = [{
+    label: a.error ? "Website check failed" : "Website check",
+    value: a.error ? a.error : `HTTP ${a.status}, ${(a.ms / 1000).toFixed(1)} s, ${a.kb} KB. ${opps.length ? `Observed: ${opps.join("; ")}.` : "No common issues observed on the home page."}`,
+    source_name: "Domain2Revenue website check", source_url: a.final_url,
+  }];
+  if (found) ev.push({ label: "Public business email", value: a.emails[0], source_name: "Listed on the business website", source_url: a.final_url });
+  await db.from("evidence").insert(ev.map((e) => ({ ...e, workspace_id: c.workspace_id, campaign_id: c.id, prospect_id: p.id, kind: "website_audit", created_by: userId, observed_at: now })));
 }

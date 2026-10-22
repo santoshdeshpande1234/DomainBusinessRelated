@@ -3,11 +3,21 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePerm } from "@/lib/session";
 import { userClient } from "@/lib/supabase/server";
-import { loadCampaign } from "@/lib/discovery/service";
+import { auditWebsite, loadCampaign, rescoreProspects, saveAudit } from "@/lib/discovery/service";
 import { INDUSTRIES, labelOf } from "@/lib/options";
 import type { Audit } from "@/lib/discovery/prospects";
-import { LAYOUTS, THEMES, buildSite, gaps, pickDesign, type SiteContent } from "@/lib/studio/site";
+import type { Side } from "@/lib/studio/competitors";
+import { ENGINES, profileFor, type EngineKey } from "@/lib/studio/growth";
+import { REFINEMENTS, STAGES, compose, refine, type Refinement, type Stage } from "@/lib/studio/compose";
+import { LAYOUTS, SECTION_LABELS, THEMES, gaps, type Sections, type SiteContent, type SiteFacts } from "@/lib/studio/site";
 import type { StepResult } from "../../../domains/actions";
+
+export type PipelineResult = StepResult & { stages?: Stage[] };
+
+/** Website checks older than this are refreshed before a preview is generated. */
+const AUDIT_MAX_AGE_DAYS = 30;
+/** Versions kept per preview; older ones are pruned. */
+const KEEP_VERSIONS = 20;
 
 async function ctx(campaignId: string, prospectId: string) {
   const s = await requirePerm("campaign:write");
@@ -24,47 +34,199 @@ const done = (campaignId: string, prospectId: string) => {
 };
 
 type Ctx = Awaited<ReturnType<typeof ctx>>;
-function draft({ c, p }: Pick<Ctx, "c" | "p">) {
-  const facts = {
+
+function siteFacts({ c, p }: Pick<Ctx, "c" | "p">): SiteFacts {
+  return {
     id: p.id, name: p.name, category: p.category, city: p.city, industry: c.industry,
     industryLabel: c.industry === "custom" ? c.custom_industry ?? "Services" : labelOf(INDUSTRIES, c.industry),
     phone: p.phone, email: p.email, address: p.address, maps_url: p.origin === "google_places" ? p.origin_url : null, website: p.website, audit: p.audit as Audit | null,
   };
-  return { content: buildSite(facts), ...pickDesign(facts) };
 }
 
-/** Creates the first draft, or rebuilds it from the latest facts (replacing edits). */
-export async function generatePreview(campaignId: string, prospectId: string): Promise<StepResult> {
+/** Everything one prospect's preview is built from. Queries are scoped to this prospect only. */
+async function gather(x: Pick<Ctx, "db" | "c" | "p">) {
+  const [{ data: comps = [] }, { data: names = [] }] = await Promise.all([
+    x.db.from("competitors").select("name, audit, reviews, rating, website").eq("prospect_id", x.p.id),
+    x.db.from("prospects").select("name").eq("campaign_id", x.c.id).neq("id", x.p.id),
+  ]);
+  const competitors: Side[] = comps!.map((k) => ({ name: k.name, audit: k.audit as Audit | null, reviews: k.reviews, rating: k.rating == null ? null : Number(k.rating), hasWebsite: !!k.website }));
+  // The client-facing preview must not mention other prospects or this prospect's competitors.
+  const others = [...names!.map((n) => n.name), ...competitors.map((k) => k.name)];
+  return { facts: siteFacts(x), reviews: (x.p.score_detail?.reviews as number | undefined) ?? null, competitors, others };
+}
+
+/** Snapshots the current content before it changes. Best effort: a failed snapshot never blocks the edit. */
+async function snapshot(x: Pick<Ctx, "db" | "c" | "s" | "w">, reason: string) {
+  const w = x.w;
+  if (!w?.content?.brand) return;
+  const { data: last } = await x.db.from("website_preview_versions").select("version").eq("preview_id", w.id).order("version", { ascending: false }).limit(1).maybeSingle();
+  const version = (last?.version ?? 0) + 1;
+  const { error } = await x.db.from("website_preview_versions").insert({
+    workspace_id: x.c.workspace_id, campaign_id: x.c.id, preview_id: w.id, version, reason: reason.slice(0, 200),
+    content: w.content, theme: w.theme, layout: w.layout, plan: w.plan ?? null, created_by: x.s.userId,
+  });
+  if (error) { console.warn("website preview version not saved", { preview: w.id, code: error.code }); return; }
+  if (version > KEEP_VERSIONS) await x.db.from("website_preview_versions").delete().eq("preview_id", w.id).lte("version", version - KEEP_VERSIONS);
+}
+
+const stageSchema = z.array(z.object({
+  key: z.enum(STAGES.map((s) => s.key) as [Stage["key"], ...Stage["key"][]]), status: z.enum(["done", "partial", "skipped", "failed"]), note: z.string().max(300),
+})).max(STAGES.length);
+
+const generation = (stages: Stage[]) => ({
+  result: stages.some((s) => s.status === "failed") ? "failed" : stages.some((s) => s.status === "partial") ? "partial" : "complete",
+  stages, finished_at: new Date().toISOString(),
+});
+
+/**
+ * Stages 1–2: checks the prospect's context and refreshes its website check when it is missing or
+ * stale. The only external call is the app's own fetch of the business's home page.
+ */
+export async function researchPreview(campaignId: string, prospectId: string, refresh = false): Promise<PipelineResult> {
+  const stages: Stage[] = [];
   try {
     const x = await ctx(campaignId, prospectId);
-    const d = draft(x);
-    const { error } = x.w
-      ? await x.db.from("website_previews").update({ content: d.content, status: "draft", updated_by: x.s.userId }).eq("id", x.w.id)
-      : await x.db.from("website_previews").insert({ workspace_id: x.c.workspace_id, campaign_id: x.c.id, prospect_id: x.p.id, ...d, created_by: x.s.userId, updated_by: x.s.userId });
+    const known = [x.p.website && "website", x.p.phone && "phone", x.p.address && "address", x.p.email && "email", x.p.category && "category"].filter(Boolean);
+    stages.push({ key: "context", status: known.length ? "done" : "partial", note: `${x.p.name}: ${known.length ? known.join(", ") : "only a name"} on record.` });
+    if (!x.p.website) {
+      stages.push({ key: "research", status: "skipped", note: "No website listed; the plan starts from a new site." });
+      return { ok: "Context loaded.", stages };
+    }
+    const a = x.p.audit as Audit | null;
+    const age = x.p.audited_at ? (Date.now() - new Date(x.p.audited_at).getTime()) / 86_400_000 : Infinity;
+    const stale = !a || age > AUDIT_MAX_AGE_DAYS || a.chat === undefined;
+    if (!refresh && !stale) {
+      stages.push({ key: "research", status: a.error ? "partial" : "done", note: a.error ? `Stored check failed (${a.error}); site details are unverified.` : `Reused the website check from ${Math.floor(age)} day(s) ago.` });
+      return { ok: "Context loaded.", stages };
+    }
+    const fresh = await auditWebsite(x.p.website);
+    await saveAudit(x.db, x.c, x.s.userId, x.p, fresh);
+    await rescoreProspects(x.db, x.c, x.s.userId, [x.p.id]);
+    stages.push({ key: "research", status: fresh.error ? "partial" : "done", note: fresh.error ? `Website could not be loaded (${fresh.error}); stored facts are used and marked unverified.` : `Home page checked (HTTP ${fresh.status}, ${(fresh.ms / 1000).toFixed(1)} s).` });
+    return { ok: "Website checked.", stages };
+  } catch (e) {
+    stages.push({ key: stages.length ? "research" : "context", status: "failed", note: (e as Error).message.slice(0, 300) });
+    return { error: (e as Error).message, stages };
+  }
+}
+
+/**
+ * Stages 3–9: gap analysis, Growth Engines, content, validation and save. "site" rebuilds the whole
+ * preview (a version of the old one is kept); "plan" refreshes only the growth layer and keeps text edits.
+ */
+export async function buildPreview(campaignId: string, prospectId: string, mode: "site" | "plan", research: Stage[] = []): Promise<PipelineResult> {
+  const prior = stageSchema.safeParse(research).data ?? [];
+  try {
+    const x = await ctx(campaignId, prospectId);
+    const m = z.enum(["site", "plan"]).parse(mode);
+    const input = await gather(x);
+    const existing = x.w?.content?.brand ? (x.w.content as SiteContent) : null;
+    const r = compose({ ...input, mode: existing ? m : "site", existing });
+    if (!r.ok) {
+      if (x.w) await x.db.from("website_previews").update({ generation: generation([...prior, ...r.stages]), updated_by: x.s.userId }).eq("id", x.w.id);
+      done(campaignId, prospectId);
+      return { error: r.error, stages: [...prior, ...r.stages] };
+    }
+    const placeholders = gaps(r.content).length;
+    const stages: Stage[] = [...prior, ...r.stages, { key: "save", status: "done", note: x.w ? "Saved; the previous version was kept." : "Saved as a new draft." }];
+    if (x.w) {
+      await snapshot(x, m === "plan" ? "Before growth plan refresh" : "Before rebuild");
+      const { error } = await x.db.from("website_previews").update({
+        content: r.content, plan: r.plan, generation: generation(stages), updated_by: x.s.userId,
+        ...(m === "site" || (placeholders && x.w.status === "ready") ? { status: "draft" } : {}),
+      }).eq("id", x.w.id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await x.db.from("website_previews").insert({
+        workspace_id: x.c.workspace_id, campaign_id: x.c.id, prospect_id: x.p.id, content: r.content, plan: r.plan, ...r.design,
+        generation: generation(stages), created_by: x.s.userId, updated_by: x.s.userId,
+      });
+      if (error) throw new Error(error.message);
+    }
+    done(campaignId, prospectId);
+    const engines = r.plan.engines.filter((e) => e.primary).length;
+    return { ok: `Preview ${x.w ? (m === "plan" ? "growth plan refreshed" : "rebuilt") : "created"} with ${r.plan.gaps.length} gaps mapped to ${engines} priority engine(s)${placeholders ? `; ${placeholders} item(s) need your input` : ""}${r.warnings.length ? "; check the validation warning" : ""}.`, stages };
+  } catch (e) {
+    return { error: (e as Error).message, stages: [...prior, { key: "save", status: "failed", note: (e as Error).message.slice(0, 300) }] };
+  }
+}
+
+/** Creates the first draft, or rebuilds it from the latest facts (replacing edits; a version is kept). */
+export async function generatePreview(campaignId: string, prospectId: string): Promise<StepResult> {
+  const r = await buildPreview(campaignId, prospectId, "site");
+  if (r.error) return { error: r.error };
+  const created = /created/.test(r.ok ?? "");
+  const n = Number(r.ok?.match(/(\d+) item\(s\) need your input/)?.[1] ?? 0);
+  return { ok: `Draft ${created ? "created" : "rebuilt"}${n ? `; ${n} item(s) need your input` : ""}.` };
+}
+
+/** One refinement, applied to this prospect's preview only. */
+export async function refinePreview(campaignId: string, prospectId: string, what: string, value?: string): Promise<StepResult> {
+  try {
+    const x = await ctx(campaignId, prospectId);
+    if (!x.w?.content?.brand) return { error: "Create a draft first." };
+    const kind = z.enum(Object.keys(REFINEMENTS) as [Refinement, ...Refinement[]]).parse(what);
+    const r = refine(x.w.content as SiteContent, kind, { name: x.p.name, heroTemplate: profileFor(x.c.industry).hero, segment: z.string().max(100).optional().parse(value) });
+    if ("error" in r) return { error: r.error };
+    await snapshot(x, `Before “${REFINEMENTS[kind]}”`);
+    const { error } = await x.db.from("website_previews").update({ content: r.content, ...(r.theme ? { theme: r.theme } : {}), ...(r.layout ? { layout: r.layout } : {}), updated_by: x.s.userId }).eq("id", x.w.id);
     if (error) throw new Error(error.message);
     done(campaignId, prospectId);
-    const g = gaps(d.content).length;
-    return { ok: `Draft ${x.w ? "rebuilt" : "created"}${g ? `; ${g} item(s) need your input` : ""}.` };
+    return { ok: r.ok };
   } catch (e) { return { error: (e as Error).message }; }
 }
 
-/** Drafts previews for every selected prospect that doesn't have one yet. Pure templating, no external calls. */
-export async function generateSelected(campaignId: string): Promise<StepResult> {
+/** Moves one Growth Engine to the front of this preview's plan. */
+export async function focusPreview(campaignId: string, prospectId: string, engine: string): Promise<StepResult> {
   try {
-    const s = await requirePerm("campaign:write");
-    const db = await userClient();
-    const c = await loadCampaign(db, campaignId);
-    const [{ data: ps }, { data: have }] = await Promise.all([
-      db.from("prospects").select("*").eq("campaign_id", c.id).eq("status", "selected"),
-      db.from("website_previews").select("prospect_id").eq("campaign_id", c.id),
-    ]);
-    const drafted = new Set(have?.map((h) => h.prospect_id));
-    const todo = (ps ?? []).filter((p) => !drafted.has(p.id));
-    if (!todo.length) return { ok: (ps ?? []).length ? "Every selected prospect already has a draft." : "Select prospects for proposals first." };
-    const { error } = await db.from("website_previews").insert(todo.map((p) => ({ workspace_id: c.workspace_id, campaign_id: c.id, prospect_id: p.id, ...draft({ c, p }), created_by: s.userId, updated_by: s.userId })));
+    const key = z.enum(Object.keys(ENGINES) as [EngineKey, ...EngineKey[]]).parse(engine);
+    const x = await ctx(campaignId, prospectId);
+    if (!x.w?.content?.growth) return { error: "Add the growth plan first." };
+    if (!(x.w.content as SiteContent).growth!.engines.some((e) => e.key === key)) return { error: "That engine has no supporting gap for this business." };
+    const r = await buildPreviewFocus(x, key);
+    done(campaignId, prospectId);
+    return r;
+  } catch (e) { return { error: (e as Error).message }; }
+}
+async function buildPreviewFocus(x: Ctx, key: EngineKey): Promise<StepResult> {
+  const input = await gather(x);
+  const r = compose({ ...input, mode: "plan", existing: x.w!.content as SiteContent, focus: key });
+  if (!r.ok) return { error: r.error };
+  await snapshot(x, "Before engine priority change");
+  const { error } = await x.db.from("website_previews").update({ content: r.content, plan: r.plan, updated_by: x.s.userId }).eq("id", x.w!.id);
+  if (error) throw new Error(error.message);
+  return { ok: `${r.plan.engines.find((e) => e.key === key)?.name ?? "Engine"} is now the lead engine.` };
+}
+
+/** Shows or hides one optional section. */
+export async function setSection(campaignId: string, prospectId: string, section: string, on: boolean): Promise<StepResult> {
+  try {
+    const key = z.enum(Object.keys(SECTION_LABELS) as [keyof Sections, ...(keyof Sections)[]]).parse(section);
+    const x = await ctx(campaignId, prospectId);
+    const c = x.w?.content as SiteContent | undefined;
+    if (!c?.sections) return { error: "Add the growth plan first." };
+    const { error } = await x.db.from("website_previews").update({ content: { ...c, sections: { ...c.sections, [key]: on } }, updated_by: x.s.userId }).eq("id", x.w!.id);
     if (error) throw new Error(error.message);
-    revalidatePath(`/campaigns/${campaignId}/studio`);
-    return { ok: `Created ${todo.length} draft(s).` };
+    done(campaignId, prospectId);
+    return { ok: `${SECTION_LABELS[key]} ${on ? "shown" : "hidden"}.` };
+  } catch (e) { return { error: (e as Error).message }; }
+}
+
+/** Restores a saved version (the current content is kept as a version first). */
+export async function restoreVersion(campaignId: string, prospectId: string, version: number): Promise<StepResult> {
+  try {
+    const x = await ctx(campaignId, prospectId);
+    if (!x.w) return { error: "Create a draft first." };
+    const { data: v } = await x.db.from("website_preview_versions").select("*").eq("preview_id", x.w.id).eq("version", z.number().int().positive().parse(version)).maybeSingle();
+    if (!v) return { error: "Version not found." };
+    await snapshot(x, `Before restoring version ${v.version}`);
+    const content = v.content as SiteContent;
+    const { error } = await x.db.from("website_previews").update({
+      content, plan: v.plan, theme: v.theme, layout: v.layout, updated_by: x.s.userId, ...(gaps(content).length && x.w.status === "ready" ? { status: "draft" } : {}),
+    }).eq("id", x.w.id);
+    if (error) throw new Error(error.message);
+    done(campaignId, prospectId);
+    return { ok: `Version ${v.version} restored.` };
   } catch (e) { return { error: (e as Error).message }; }
 }
 
@@ -81,7 +243,8 @@ const lines = (s: string, max: number) => s.split("\n").map((x) => x.trim()).fil
 
 export async function saveContent(campaignId: string, prospectId: string, _: StepResult | undefined, form: FormData): Promise<StepResult> {
   try {
-    const { s, db, w } = await ctx(campaignId, prospectId);
+    const x = await ctx(campaignId, prospectId);
+    const { s, db, w } = x;
     if (!w) return { error: "Create a draft first." };
     const v = editSchema.safeParse(Object.fromEntries(form));
     if (!v.success) return { error: v.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
@@ -99,6 +262,7 @@ export async function saveContent(campaignId: string, prospectId: string, _: Ste
       services, features: lines(d.features, 6), steps: lines(d.steps, 4), about: d.about,
     };
     const g = gaps(content);
+    await snapshot(x, "Before text edit");
     const { error } = await db.from("website_previews").update({
       content, theme: d.theme, layout: d.layout, domain_id: d.domain_id || null, updated_by: s.userId,
       ...(g.length && w.status === "ready" ? { status: "draft" } : {}),
