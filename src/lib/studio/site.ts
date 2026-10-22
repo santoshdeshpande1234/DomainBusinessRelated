@@ -1,6 +1,7 @@
 // Website preview content built from verified facts only. Anything we don't know is a visible
 // placeholder ("[[...]]") for a member to fill in; a preview can't be marked ready while one remains.
 import type { Audit } from "@/lib/discovery/prospects";
+import type { ClientGrowth, EngineKey } from "./growth";
 
 export type Service = { title: string; text: string; source: "website" | "member" | "placeholder" };
 export type SiteContent = {
@@ -14,6 +15,16 @@ export type SiteContent = {
   contact: { phone: string | null; email: string | null; address: string | null; maps_url: string | null };
   booking: boolean;
   sources: { label: string; url: string | null }[];
+  // Added with the growth plan; older previews don't have these and render as before.
+  growth?: ClientGrowth;
+  faq?: { q: string; a: string }[];
+  assistant?: { greeting: string; answers: { q: string; a: string; keys: string[] }[]; fallback: string };
+  finder?: { question: string; options: { need: string; service: string; cta: string }[] };
+  sections?: Sections;
+};
+export type Sections = { assistant: boolean; finder: boolean; qualify: boolean; faq: boolean; differentiation: boolean };
+export const SECTION_LABELS: Record<keyof Sections, string> = {
+  assistant: "AI concierge demo", finder: "Service finder", qualify: "Qualifying enquiry form", faq: "FAQ", differentiation: "Why choose us",
 };
 
 export const THEMES = {
@@ -21,6 +32,7 @@ export const THEMES = {
   sage: { label: "Sage", ink: "#1d3a2a", accent: "#2f6b48", soft: "#eaf3ec", font: "ui-sans-serif, system-ui, sans-serif" },
   clay: { label: "Clay", ink: "#3a2318", accent: "#a2471f", soft: "#f8ece5", font: "Georgia, 'Times New Roman', serif" },
   slate: { label: "Slate", ink: "#1e1b4b", accent: "#4338ca", soft: "#eef0ff", font: "ui-sans-serif, system-ui, sans-serif" },
+  atelier: { label: "Atelier (premium)", ink: "#1c1917", accent: "#8a6a3b", soft: "#f6f1e9", font: "Georgia, 'Times New Roman', serif" },
 } as const;
 export type ThemeKey = keyof typeof THEMES;
 export const LAYOUTS = { split: "Split hero", centered: "Centered hero" } as const;
@@ -114,4 +126,86 @@ export function jsonLd(c: SiteContent, url: string | null) {
     "@context": "https://schema.org", "@type": "LocalBusiness", name: c.brand.name, description: PLACEHOLDER.test(c.about) ? undefined : c.about,
     telephone: c.contact.phone ?? undefined, email: c.contact.email ?? undefined, address: c.contact.address ?? undefined, url: url ?? undefined,
   };
+}
+
+// ---------------------------------------------------------------- growth layer
+
+const lc = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+
+/**
+ * Adds the growth plan, FAQ and interactive demos to a site. Everything here comes from the content's
+ * own facts (services, contact details) or the client-safe plan, so it can't mention another business.
+ */
+export function withGrowth(c: SiteContent, g: ClientGrowth, opts: { keepHero?: boolean; sections?: Partial<Sections> } = {}): SiteContent {
+  const services = c.services.filter((s) => !PLACEHOLDER.test(s.title)).map((s) => s.title);
+  const tel = c.contact.phone;
+  const action = lc(c.hero.primary_cta);
+  const faq = [
+    { q: `How do I ${action}?`, a: `Use the “${c.hero.primary_cta}” form on this page${tel ? ` or call ${tel}` : ""}. ${c.brand.name} will confirm the details with you.` },
+    services.length ? { q: `What does ${c.brand.name} offer?`, a: `${services.join(", ")}. Ask about any of these through the form.` } : null,
+    c.contact.address ? { q: "Where are you?", a: c.contact.address } : null,
+    tel || c.contact.email ? { q: "How can I contact the team?", a: [tel && `Call ${tel}`, c.contact.email && `email ${c.contact.email}`].filter(Boolean).join(" or ") + "." } : null,
+    { q: "What happens after I send an enquiry?", a: `${c.brand.name} reviews it and replies to confirm the next step.` },
+  ].filter((x): x is { q: string; a: string } => !!x);
+
+  const answers = [
+    services.length ? { q: "What services do you offer?", a: `${c.brand.name} offers ${services.join(", ")}.`, keys: ["service", "offer", "do you do", "treatment", "provide", "help with"] } : null,
+    { q: `How do I ${action}?`, a: faq[0].a, keys: ["book", "appointment", "quote", "visit", "start", "enquir", "inquir", "consult", "availability"] },
+    tel ? { q: "What's your phone number?", a: `You can call ${tel}.`, keys: ["phone", "call", "number", "talk"] } : null,
+    c.contact.address ? { q: "Where are you located?", a: `${c.brand.name} is at ${c.contact.address}.`, keys: ["where", "address", "located", "location", "find you", "directions"] } : null,
+    { q: "How much does it cost?", a: "Prices aren't published on this page yet. Send an enquiry and the team will give you a quote for your situation.", keys: ["price", "cost", "fee", "how much", "charge", "rate"] },
+    { q: "When are you open?", a: `Opening hours haven't been confirmed for this preview${tel ? `; please call ${tel} to check` : ""}.`, keys: ["open", "hours", "close", "today", "weekend", "time"] },
+  ].filter((x): x is { q: string; a: string; keys: string[] } => !!x);
+
+  const finderOptions = services.length >= 2
+    ? services.slice(0, 6).map((s) => ({ need: s, service: s, cta: c.hero.primary_cta }))
+    : (g.qualify[0]?.options ?? []).map((o) => ({ need: o, service: `${c.brand.name} will recommend the right option`, cta: c.hero.primary_cta }));
+
+  const hero = opts.keepHero ? c.hero : {
+    ...c.hero,
+    sub: `${g.segment ? `For ${g.segment}: ` : ""}${g.promise}`,
+  };
+  return {
+    ...c, hero, growth: g, faq,
+    assistant: { greeting: `Hi! Ask me about ${c.brand.name}.`, answers, fallback: `I can only answer from the details on this page. In the live version, questions I can't answer go straight to the ${c.brand.name} team.` },
+    finder: { question: g.qualify[0]?.label ?? "What do you need?", options: finderOptions },
+    sections: { assistant: true, finder: finderOptions.length >= 2, qualify: true, faq: true, differentiation: g.differentiation.length + g.strengths.length > 0, ...c.sections, ...opts.sections },
+  };
+}
+
+/** Moves one engine to the front, marking the first three as primary. */
+export function focusEngine(g: ClientGrowth, key: EngineKey | null): ClientGrowth {
+  if (!key) return { ...g, focus: null };
+  const engines = [...g.engines].sort((a, b) => Number(b.key === key) - Number(a.key === key)).map((e, i) => ({ ...e, primary: i < 3 }));
+  return { ...g, engines, focus: key };
+}
+
+// Claims a fact-only preview must never make unless the business published them.
+const TRUST_CLAIM = /\b(testimonials?|award[- ]winning|awards?|certified|accredited|#1|number one|best in|guaranteed?|rated \d|five[- ]star|5[- ]star|trusted by \d|\d+\+? (happy )?(clients|customers|patients))\b/i;
+
+/** Stage 8: checks a generated site before it is saved. Returns problems; empty means valid. */
+export function validateSite(c: SiteContent, otherBusinesses: string[] = []): string[] {
+  const out: string[] = [];
+  if (!c.brand?.name?.trim()) out.push("Business name is missing");
+  if (!c.hero?.headline?.trim()) out.push("Hero headline is missing");
+  if (!c.services?.length) out.push("No services section");
+  if (!c.contact?.phone && !c.contact?.email && !c.hero?.primary_cta) out.push("No way to get in touch");
+  if (c.growth && !c.growth.engines.length) out.push("No Growth Engines selected");
+  const text: string[] = [];
+  const walk = (v: unknown, k = "") => {
+    if (typeof v === "string") { if (k !== "url") text.push(v); }
+    else if (Array.isArray(v)) v.forEach((x) => walk(x));
+    else if (v && typeof v === "object") for (const [kk, x] of Object.entries(v)) if (kk !== "sources") walk(x, kk);
+  };
+  walk(c);
+  // Our own disclaimers ("rankings are never guaranteed") are not claims.
+  const all = text.join("\n").replace(/\b(never|not|no \w+ is) guaranteed\b/gi, "");
+  const claim = all.match(TRUST_CLAIM);
+  if (claim) out.push(`Unsupported trust claim: “${claim[0]}”`);
+  const own = c.brand.name.toLowerCase();
+  for (const n of otherBusinesses) {
+    const x = n.trim().toLowerCase();
+    if (x.length >= 4 && !own.includes(x) && all.toLowerCase().includes(x)) out.push(`Mentions another business: ${n}`);
+  }
+  return out;
 }

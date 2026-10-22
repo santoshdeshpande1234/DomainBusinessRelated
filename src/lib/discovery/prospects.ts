@@ -32,6 +32,8 @@ export type Audit = {
   copyright_year: number | null; generator: string | null; error?: string;
   // Added in Phase 3; older audits don't have them.
   nav?: string[]; headings?: string[]; pricing?: boolean;
+  // Added with the growth plan; older audits don't have them (unknown, not "no").
+  analytics?: boolean; chat?: boolean;
 };
 
 const BOOKING = /\b(book (an? )?(appointment|table|now|online|consultation)|schedule (a|an|your)|appointment|calendly\.com|reserve (a|now)|booking)\b/i;
@@ -39,6 +41,8 @@ const CTAS = ["contact us", "get a quote", "request a quote", "free quote", "cal
 
 // Navigation labels that say nothing about what a business offers.
 const GENERIC_NAV = /^(home|about( us)?|contact( us)?|blog|news|login|log in|sign in|sign up|register|careers|jobs|privacy( policy)?|terms.*|faq|faqs|search|menu|cart|account|my account|gallery|team|our team|testimonials|reviews|more|english|en|skip to content|\W*)$/i;
+const ANALYTICS = /googletagmanager\.com|google-analytics\.com|gtag\(|plausible\.io|matomo|clarity\.ms|connect\.facebook\.net|static\.hotjar\.com|segment\.com\/analytics/i;
+const CHAT = /tawk\.to|intercom|driftt?\.com|crisp\.chat|livechatinc|tidio|zopim|zendesk\.com\/embeddable|hubspot.*conversations|wa\.me\/|api\.whatsapp\.com|freshchat|chatbot/i;
 const PRICE = /[$£€₹]\s?\d|\b(?:rs\.?|inr|usd|aed|sgd)\s?\d|\bpricing\b|\bprices?\b(?! on request)/i;
 
 const strip = (s: string) => s.replace(/<[^>]*>/g, " ").replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -69,6 +73,8 @@ export function parseAudit(input: { url: string; finalUrl: string; status: numbe
       .map((m) => strip(m[1])).filter((t) => t.length >= 3 && t.length <= 40 && !GENERIC_NAV.test(t)))].slice(0, 12),
     headings: [...h.matchAll(/<h[23][^>]*>([\s\S]*?)<\/h[23]>/gi)].map((m) => strip(m[1])).filter((t) => t.length >= 3 && t.length <= 80).slice(0, 10),
     pricing: PRICE.test(text),
+    analytics: ANALYTICS.test(h),
+    chat: CHAT.test(h),
   };
 }
 

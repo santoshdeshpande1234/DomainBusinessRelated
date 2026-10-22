@@ -89,7 +89,8 @@ await shot("financials"); step(`financial model: base case ₹126,000/yr, ${fm.c
 
 // ---------------------------------------------------------------- website studio
 await page.goto(`${B}/campaigns/${id}/prospects/${pid}/website`);
-await page.click("button:has-text('Create draft')"); await page.getByText(/Draft created; 1 item\(s\) need your input/).waitFor();
+await page.click("button:has-text('Generate preview')"); await page.getByText(/Preview created with \d+ gaps mapped to 3 priority engine\(s\); 1 item\(s\) need your input/).waitFor();
+await page.getByText("Gap analysis").first().waitFor();
 await page.reload();
 await page.getByText("1 placeholder(s) to fill before it can be marked ready").waitFor();
 must(await page.locator("button:has-text('Mark ready')").isDisabled(), "ready blocked by placeholders");
@@ -97,6 +98,15 @@ const frame = page.frameLocator("iframe");
 await frame.getByRole("heading", { name: "Dentist in Pune" }).waitFor();
 await frame.getByText("Dental implants").waitFor();
 await frame.getByText("Not the business's live website").waitFor();
+await frame.getByText("Simulated demo").first().waitFor();
+await page.getByRole("button", { name: "Growth plan" }).click();
+await page.frameLocator("iframe").getByRole("heading", { name: "Growth Engines for Smile Studio" }).waitFor();
+must(!(await page.frameLocator("iframe").locator("body").innerText()).includes("Bright Teeth"), "client plan names no competitor");
+await page.getByRole("button", { name: "Proposed website" }).click();
+await page.click("button:has-text('Make it more premium')"); await page.getByText("Switched to the premium Atelier style").waitFor();
+await page.reload();
+await page.getByText(/v1 Before “Make it more premium”/).waitFor();
+step("growth plan generated, client-safe, refined with a version kept");
 await page.fill("#about", "Smile Studio is a family dental practice on FC Road.");
 await page.selectOption("#domain_id", { index: 1 });
 await page.click("button:has-text('Save')"); await page.getByText("Saved.", { exact: true }).waitFor();

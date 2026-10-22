@@ -30,6 +30,18 @@ evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
   Private staging link at `/preview/<token>`, never indexed; a share link needs "ready" status and can be revoked.
   No AI copy yet (OpenAI drafting is planned once a key is saved).
 
+**Website studio growth engine** (per selected prospect)
+- Every observed website gap (and labelled industry recommendations) is mapped to a solution, website feature, AI or
+  automation, customer benefit, KPI, priority and dependencies, then grouped into Growth Engines (lead generation,
+  sales conversion, customer experience, retention, operational automation, search visibility, business intelligence).
+- The preview has two pages: the proposed website (service finder, qualifying enquiry form, FAQ and a scripted
+  concierge, each labelled working / simulated / proposed / not configured) and a client-ready growth plan (today vs
+  proposed, Growth Engines as the primary services with the website as the foundation, gap-to-growth map, rollout,
+  KPIs and a what-if calculator with no pre-filled baseline). Competitor names, evidence and financials stay internal.
+- Studio: multi-prospect generation one at a time with real per-stage status and retry, desktop/tablet/mobile frames,
+  refinements (premium style, hero, lead generation, engine priority, segment, sections), versions with compare and
+  restore. Deterministic code only; the one external call is the app's own home-page check when it is stale.
+
 Rules the code follows: no fabricated data, nothing is bought, sent or deployed without approval, calculations are
 deterministic code, and every external call is logged with its cost.
 

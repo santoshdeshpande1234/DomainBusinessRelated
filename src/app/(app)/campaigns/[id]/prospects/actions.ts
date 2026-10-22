@@ -7,8 +7,8 @@ import { getCredentials, markIntegration } from "@/lib/integrations";
 import { searchTerms } from "@/lib/discovery/keywords";
 import { PLACES_COST_PER_REQUEST_USD, langCode, searchPlaces } from "@/lib/discovery/places";
 import { campaignSpendUsd } from "@/lib/discovery/net";
-import { EMAIL_RE, csvRecords, dedupeKey, normalizeWebsite, opportunities, parseCsv } from "@/lib/discovery/prospects";
-import { auditWebsite, loadCampaign, prospectBudgetUsd, rescoreProspects } from "@/lib/discovery/service";
+import { EMAIL_RE, csvRecords, dedupeKey, normalizeWebsite, parseCsv } from "@/lib/discovery/prospects";
+import { auditWebsite, loadCampaign, prospectBudgetUsd, rescoreProspects, saveAudit } from "@/lib/discovery/service";
 import type { StepResult } from "../domains/actions";
 
 const fail = (e: unknown): StepResult => ({ error: (e as Error).message });
@@ -136,19 +136,7 @@ export async function auditProspects(campaignId: string): Promise<StepResult> {
     const { data: batch } = await db.from("prospects").select("id, website, email").eq("campaign_id", c.id).not("website", "is", null)
       .is("audited_at", null).neq("status", "excluded").order("score", { ascending: false, nullsFirst: false }).limit(4);
     const results = await Promise.all((batch ?? []).map(async (p) => ({ p, a: await auditWebsite(p.website!) })));
-    const now = new Date().toISOString();
-    for (const { p, a } of results) {
-      const found = !p.email && a.emails?.[0];
-      await db.from("prospects").update({ audit: a, audited_at: now, updated_by: s.userId, ...(found ? { email: a.emails[0] } : {}) }).eq("id", p.id);
-      const opps = opportunities(a, true);
-      const ev = [{
-        label: a.error ? "Website check failed" : "Website check",
-        value: a.error ? a.error : `HTTP ${a.status}, ${(a.ms / 1000).toFixed(1)} s, ${a.kb} KB. ${opps.length ? `Observed: ${opps.join("; ")}.` : "No common issues observed on the home page."}`,
-        source_name: "Domain2Revenue website check", source_url: a.final_url,
-      }];
-      if (found) ev.push({ label: "Public business email", value: a.emails[0], source_name: "Listed on the business website", source_url: a.final_url });
-      await db.from("evidence").insert(ev.map((e) => ({ ...e, workspace_id: c.workspace_id, campaign_id: c.id, prospect_id: p.id, kind: "website_audit", created_by: s.userId, observed_at: now })));
-    }
+    for (const { p, a } of results) await saveAudit(db, c, s.userId, p, a);
     await rescoreProspects(db, c, s.userId);
     const { count } = await db.from("prospects").select("id", { count: "exact", head: true }).eq("campaign_id", c.id).not("website", "is", null).is("audited_at", null).neq("status", "excluded");
     done(campaignId);
