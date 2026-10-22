@@ -174,7 +174,7 @@ describe("generation with the inventory and the saved plan", () => {
     if (!r.ok) throw new Error(r.error);
     expect(r.plan).toBe(saved);
     expect(r.blueprint.features.some((f) => f.key === "tracking")).toBe(false);
-    expect(r.stages[0].note).toMatch(/Saved Growth Plan from 2026-10-01/);
+    expect(r.stages.find((s) => s.key === "gaps")!.note).toMatch(/Saved Growth Plan from 2026-10-01/);
     // Refreshing the plan on purpose regenerates it.
     const fresh = compose({ ...input(), savedPlan: saved, mode: "plan", existing: r.content });
     if (!fresh.ok) throw new Error(fresh.error);

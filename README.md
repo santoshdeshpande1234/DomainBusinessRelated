@@ -31,6 +31,12 @@ evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
   No AI copy yet (OpenAI drafting is planned once a key is saved).
 
 **Website studio growth engine** (per selected prospect)
+- Competitive position first: each business is compared with nearby businesses on six dimensions (reputation and
+  trust, ease of buying, responsiveness, clarity of offer, discoverability, digital foundation), weighted by what
+  decides customers in its industry. Website defects are one input (digital foundation, lowest weight). The audit says
+  where it is ahead, behind or on open ground, the capabilities to build, implementations ranked by evidence
+  likelihood, and a five-year industry outlook with readiness (an outlook, never a forecast). Evidence strength is
+  scored and says what to add. Gaps that win back competitive ground rank ahead of plain defects in the plan.
 - Every observed website gap (and labelled industry recommendations) is mapped to a solution, website feature, AI or
   automation, customer benefit, KPI, priority and dependencies, then grouped into Growth Engines (lead generation,
   sales conversion, customer experience, retention, operational automation, search visibility, business intelligence).
