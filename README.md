@@ -41,6 +41,13 @@ evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
 - Studio: multi-prospect generation one at a time with real per-stage status and retry, desktop/tablet/mobile frames,
   refinements (premium style, hero, lead generation, engine priority, segment, sections), versions with compare and
   restore. Deterministic code only; the one external call is the app's own home-page check when it is stale.
+- Original website inventory: the prospect's own site is read page by page (navigation, sitemap, robots.txt; up to
+  12 pages, a few per server step). Each page keeps its URL, extraction status and what was missing; testimonials,
+  awards and other claims are set aside for review, never copied.
+- Blueprint: every original page is improved, preserved, merged, replaced or excluded with a reason, and every saved
+  Growth Plan item is mapped to the page and component that builds it (built / simulated / proposed / needs review).
+  On rebuild the saved plan is the source of truth. The preview becomes a multi-page site (`?page=`), including
+  service detail pages, in the business's own logo and colours.
 
 Rules the code follows: no fabricated data, nothing is bought, sent or deployed without approval, calculations are
 deterministic code, and every external call is logged with its cost.

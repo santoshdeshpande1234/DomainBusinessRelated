@@ -101,8 +101,9 @@ describe("preview generation", () => {
   it("builds a complete, validated preview and reports each stage", () => {
     const r = compose(input());
     if (!r.ok) throw new Error(r.error);
-    expect(r.stages.map((s) => s.key)).toEqual(["gaps", "engines", "content", "validate"]);
-    expect(r.stages.every((s) => s.status === "done")).toBe(true);
+    expect(r.stages.map((s) => s.key)).toEqual(["gaps", "engines", "blueprint", "content", "validate"]);
+    // Without a page inventory the blueprint is partial; everything else completes.
+    expect(r.stages.filter((s) => s.status !== "done").map((s) => s.key)).toEqual(["blueprint"]);
     const c = r.content;
     expect(c.growth!.engines.length).toBeGreaterThan(0);
     expect(c.faq!.map((f) => f.q)).toContain("How do I book an appointment?");

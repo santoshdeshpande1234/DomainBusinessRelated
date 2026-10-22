@@ -3,15 +3,19 @@
 import type { Side } from "./competitors";
 import { buildPlan, clientGrowth, type EngineKey, type GrowthPlan } from "./growth";
 import { buildSite, focusEngine, pickDesign, validateSite, withGrowth, type Sections, type SiteContent, type SiteFacts } from "./site";
+import { buildBlueprint, type Blueprint } from "./blueprint";
+import type { Inventory } from "./inventory";
 
-export type StageKey = "context" | "research" | "gaps" | "engines" | "content" | "validate" | "save";
+export type StageKey = "context" | "research" | "inventory" | "gaps" | "engines" | "blueprint" | "content" | "validate" | "save";
 export type StageStatus = "done" | "partial" | "skipped" | "failed";
 export type Stage = { key: StageKey; status: StageStatus; note: string };
 export const STAGES: { key: StageKey; label: string }[] = [
   { key: "context", label: "Prospect context" },
   { key: "research", label: "Website research" },
+  { key: "inventory", label: "Website page inventory" },
   { key: "gaps", label: "Gap analysis" },
   { key: "engines", label: "Growth Engine selection" },
+  { key: "blueprint", label: "Content and feature blueprint" },
   { key: "content", label: "Content generation" },
   { key: "validate", label: "Preview validation" },
   { key: "save", label: "Saved" },
@@ -24,9 +28,13 @@ export type ComposeInput = {
   /** "site" rebuilds everything; "plan" keeps the existing text and refreshes only the growth layer. */
   mode: "site" | "plan"; existing?: SiteContent | null;
   focus?: EngineKey | null; segment?: string | null; sections?: Partial<Sections>;
+  /** Pages read from their website; null when it hasn't been read yet. */
+  inventory?: Inventory | null;
+  /** The saved Growth Plan. In "site" mode it is the source of truth and is not regenerated. */
+  savedPlan?: GrowthPlan | null;
   now?: Date;
 };
-export type Composed = { ok: true; content: SiteContent; plan: GrowthPlan; design: ReturnType<typeof pickDesign>; stages: Stage[]; warnings: string[] }
+export type Composed = { ok: true; content: SiteContent; plan: GrowthPlan; blueprint: Blueprint; design: ReturnType<typeof pickDesign>; stages: Stage[]; warnings: string[] }
   | { ok: false; stages: Stage[]; error: string };
 
 export function compose(x: ComposeInput): Composed {
@@ -36,18 +44,25 @@ export function compose(x: ComposeInput): Composed {
     name: f.name, industry: f.industry, industryLabel: f.industryLabel, category: f.category, city: f.city, website: f.website, audit: f.audit,
     phone: f.phone, email: f.email, address: f.address, reviews: x.reviews, services, competitors: x.competitors,
   };
-  const plan = buildPlan(growthFacts, { focus: x.focus, now: x.now });
+  const reuse = x.mode === "site" && !!x.savedPlan?.gaps?.length && !x.focus;
+  const plan = reuse ? x.savedPlan! : buildPlan(growthFacts, { focus: x.focus, now: x.now });
   const stages: Stage[] = [];
   const observed = plan.gaps.filter((g) => g.basis !== "industry").length;
   stages.push({ key: "gaps", status: observed ? "done" : "partial",
-    note: `${plan.gaps.length} gap(s): ${observed} observed, ${plan.gaps.length - observed} industry recommendation(s)${observed ? "" : "; nothing could be observed, so the plan rests on assumptions"}.` });
+    note: `${reuse ? `Saved Growth Plan from ${plan.built_at.slice(0, 10)} used as the source of truth. ` : ""}${plan.gaps.length} gap(s): ${observed} observed, ${plan.gaps.length - observed} industry recommendation(s)${observed ? "" : "; nothing could be observed, so the plan rests on assumptions"}.` });
   stages.push({ key: "engines", status: plan.engines.length ? "done" : "failed", note: plan.engines.filter((e) => e.primary).map((e) => e.name).join(", ") || "No engine matched" });
 
   const keep = x.mode === "plan" && x.existing?.brand;
   const base = keep ? x.existing! : buildSite(f);
   let g = clientGrowth(plan, growthFacts, { segment: x.segment ?? x.existing?.growth?.segment ?? null, focus: x.focus ?? x.existing?.growth?.focus ?? null });
   g = focusEngine(g, g.focus);
-  const content = withGrowth(base, g, { keepHero: !!keep, sections: x.sections });
+  const grown = withGrowth(base, g, { keepHero: !!keep, sections: x.sections });
+  const bp = buildBlueprint(x.inventory ?? null, plan, { name: f.name, industry: f.industry, primaryCta: grown.hero.primary_cta, booking: grown.booking, hasPhone: !!f.phone }, x.others, x.now);
+  const content = applyBlueprint(grown, bp, x.inventory ?? null, !!keep);
+  const count = (k: string) => bp.originals.filter((o) => o.action === k).length;
+  const fcount = (k: string) => bp.features.filter((o) => o.status === k).length;
+  stages.push({ key: "blueprint", status: !f.website ? "done" : bp.originals.length ? (bp.review.length ? "partial" : "done") : "partial",
+    note: `${bp.originals.length ? `${bp.originals.length} original page(s): ${count("improved")} improved, ${count("preserved")} preserved, ${count("merged")} merged, ${count("replaced")} replaced, ${count("excluded")} excluded` : f.website ? "Their website hasn't been read page by page" : "No existing website to preserve; built from the listing and the plan"}. ${bp.features.length} plan item(s): ${fcount("implemented")} built, ${fcount("simulated")} simulated, ${fcount("proposed")} proposed, ${fcount("review")} to review. ${bp.pages.length} page(s) in the proposed site.` });
   stages.push({ key: "content", status: "done", note: keep ? "Growth plan, FAQ and demos refreshed; your text edits were kept." : "Website, growth plan, FAQ and demos built from the facts held." });
 
   const problems = validateSite(content, x.others.filter((n) => n.trim().toLowerCase() !== f.name.trim().toLowerCase()));
@@ -58,7 +73,22 @@ export function compose(x: ComposeInput): Composed {
   }
   const warnings = problems.filter((p) => p.startsWith("Unsupported trust claim")).map((p) => `${p} (check where it came from before sharing)`);
   stages.push({ key: "validate", status: warnings.length ? "partial" : "done", note: warnings.length ? warnings.join("; ") : "Content complete, no unsupported claims, no other business mentioned." });
-  return { ok: true, content, plan, design: pickDesign(f), stages, warnings };
+  return { ok: true, content, plan, blueprint: bp, design: pickDesign(f), stages, warnings };
+}
+
+/** Puts the blueprint's pages, the business's own services and brand into the site content. */
+function applyBlueprint(c: SiteContent, bp: Blueprint, inv: Inventory | null, keepText: boolean): SiteContent {
+  const fromPages = bp.services.filter((s) => s.slug);
+  const services = !keepText && fromPages.length
+    ? fromPages.map((s) => ({ title: s.title, text: s.text, source: "website" as const, slug: s.slug }))
+    : c.services.map((s) => ({ ...s, slug: fromPages.find((x) => x.title.toLowerCase() === s.title.toLowerCase())?.slug ?? s.slug ?? null }));
+  const about = inv?.pages.find((p) => p.kind === "about" && p.paragraphs.length)?.paragraphs[0];
+  const brand = inv ? { ...c.brand, logo: inv.brand.logo, colors: inv.brand.accent ? { accent: inv.brand.accent, ink: inv.brand.ink } : null } : c.brand;
+  return {
+    ...c, brand, services, pages: bp.pages,
+    about: !keepText && about && /\[\[/.test(c.about) ? about : c.about,
+    sources: inv ? [...c.sources.filter((x) => x.label !== "Pages read from their website"), { label: "Pages read from their website", url: inv.root }] : c.sources,
+  };
 }
 
 // ---------------------------------------------------------------- refinements

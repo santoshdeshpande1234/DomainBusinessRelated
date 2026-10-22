@@ -10,6 +10,8 @@ import { money, when } from "@/lib/format";
 import { gaps, type SiteContent } from "@/lib/studio/site";
 import type { GrowthPlan } from "@/lib/studio/growth";
 import type { Stage } from "@/lib/studio/compose";
+import type { Blueprint } from "@/lib/studio/blueprint";
+import { missingInfo, type Inventory } from "@/lib/studio/inventory";
 import { computeModel, type Input, type ModelKind } from "@/lib/studio/financial";
 import { Editor } from "./editor";
 import { PipelineButton, StageList } from "./pipeline";
@@ -23,18 +25,22 @@ const PRIORITY: Record<string, Tone> = { high: "accent", medium: "neutral", low:
 const BASIS: Record<string, [string, Tone]> = { observed: ["Observed", "good"], competitor: ["Observed + competitors", "good"], industry: ["Assumption", "warn"] };
 const GEN: Record<string, [string, Tone]> = { complete: ["Preview ready", "good"], partial: ["Partial result", "warn"], failed: ["Last run failed", "bad"] };
 const LEVEL = ["", "low", "medium", "high"];
+const ACTION: Record<string, Tone> = { preserved: "good", improved: "good", merged: "accent", replaced: "accent", excluded: "warn" };
+const FEATURE: Record<string, [string, Tone]> = { implemented: ["Built", "good"], simulated: ["Simulated", "warn"], proposed: ["Proposed integration", "accent"], review: ["Needs review", "bad"] };
 
 export default async function WebsitePage({ params }: { params: Promise<{ id: string; prospectId: string }> }) {
   const { id, prospectId } = await params;
   const s = await getSession();
   const db = await userClient();
-  const [{ data: p }, { data: c }, { data: w }, { data: domains = [] }, { data: fm }] = await Promise.all([
+  const [{ data: p }, { data: c }, { data: w }, { data: domains = [] }, { data: fm }, { data: invRow }] = await Promise.all([
     db.from("prospects").select("id, name, website").eq("id", prospectId).eq("campaign_id", id).maybeSingle(),
     db.from("campaigns").select("name, currency").eq("id", id).maybeSingle(),
     db.from("website_previews").select("*").eq("prospect_id", prospectId).maybeSingle(),
     db.from("domains").select("id, name, status").eq("campaign_id", id).in("status", ["shortlisted", "approved"]).order("score", { ascending: false }).limit(100),
     db.from("financial_models").select("model, inputs").eq("prospect_id", prospectId).maybeSingle(),
+    db.from("site_inventories").select("status, crawled_at, inventory").eq("prospect_id", prospectId).maybeSingle(),
   ]);
+  const inv = (invRow?.inventory as Inventory | undefined)?.pages ? (invRow!.inventory as Inventory) : null;
   if (!p || !c) notFound();
   const { data: versions = [] } = w
     ? await db.from("website_preview_versions").select("version, reason, created_at").eq("preview_id", w.id).order("version", { ascending: false }).limit(20)
@@ -42,6 +48,7 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
   const write = can(s.role, "campaign:write");
   const content = w?.content as SiteContent | undefined;
   const plan = w?.plan as GrowthPlan | null | undefined;
+  const bp = w?.blueprint as Blueprint | null | undefined;
   const gen = w?.generation as { result?: string; stages?: Stage[]; finished_at?: string } | undefined;
   const todo = content ? gaps(content) : [];
   const url = w ? `${serverEnv("APP_URL").replace(/\/$/, "")}/preview/${w.token}` : null;
@@ -66,8 +73,52 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
         <div className="grid gap-6 lg:grid-cols-5">
           <div className="min-w-0 space-y-6 lg:col-span-3">
             <Card title="Preview" description={`Previewing ${p.name}. Proposed redesign, not their live website.`}>
-              <PreviewWorkspace token={w.token} name={p.name} currentSite={p.website} hasPlan={!!content.growth} versions={versions!.map((v) => ({ version: v.version, reason: v.reason, at: v.created_at }))} />
+              <PreviewWorkspace token={w.token} name={p.name} currentSite={p.website} hasPlan={!!content.growth} versions={versions!.map((v) => ({ version: v.version, reason: v.reason, at: v.created_at }))} pages={(content.pages ?? []).map((x) => ({ slug: x.slug, title: x.title }))} />
             </Card>
+
+            <Card title="Original website inventory" description={inv ? `${inv.root.replace(/^https?:\/\//, "")}: ${inv.pages.length} page(s) read ${when(invRow!.crawled_at)}${inv.sitemap ? ", using its sitemap" : ""}${inv.robots ? "; robots.txt respected" : ""}. Internal.` : undefined}>
+              {!inv ? <p className="text-sm text-muted">{p.website ? "Their website hasn't been read page by page yet. Regenerate with fresh research to read it." : "No website is listed, so the proposed site starts from the listing and the Growth Plan."}</p> : (
+                <div className="space-y-3">
+                  <div className="-mx-5 overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-xs">
+                      <thead><tr className="border-b border-line text-left text-faint"><th className="px-5 py-2 font-medium">Original page</th><th className="px-2 py-2 font-medium">Read</th><th className="px-2 py-2 font-medium">Outcome</th><th className="px-5 py-2 font-medium">Why</th></tr></thead>
+                      <tbody className="divide-y divide-line">
+                        {(bp?.originals ?? inv.pages.map((x) => ({ url: x.url, title: x.title ?? x.url, kind: x.kind, extraction: x.status, action: "", target: null, reason: x.note ?? "" }))).map((o) => (
+                          <tr key={o.url}>
+                            <td className="px-5 py-2"><a href={o.url} target="_blank" rel="noopener noreferrer nofollow" className="font-medium hover:text-accent">{o.title}</a><span className="block text-faint">{new URL(o.url).pathname} · {o.kind}</span></td>
+                            <td className="px-2 py-2"><Badge tone={o.extraction === "extracted" ? "good" : o.extraction === "failed" ? "bad" : "warn"}>{o.extraction}</Badge></td>
+                            <td className="px-2 py-2">{o.action ? <Badge tone={ACTION[o.action]}>{o.action}{o.target ? ` → ${o.target}` : ""}</Badge> : "—"}</td>
+                            <td className="px-5 py-2 text-muted">{o.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {missingInfo(inv).length > 0 && <p className="text-xs text-muted"><span className="font-medium text-warn">Not found on their site:</span> {missingInfo(inv).join("; ")}.</p>}
+                  {bp?.review.length ? <details className="text-xs"><summary className="cursor-pointer font-medium text-warn">{bp.review.length} item(s) to review</summary><ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted">{bp.review.map((r) => <li key={r}>{r}</li>)}</ul></details> : null}
+                </div>
+              )}
+            </Card>
+
+            {bp && (
+              <Card title="Growth Plan implementation checklist" description="Every saved plan recommendation, where it is built in the proposed site, and its honest status. Internal.">
+                <div className="-mx-5 overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-xs">
+                    <thead><tr className="border-b border-line text-left text-faint"><th className="px-5 py-2 font-medium">Recommendation</th><th className="px-2 py-2 font-medium">Where</th><th className="px-2 py-2 font-medium">Status</th><th className="px-5 py-2 font-medium">Notes</th></tr></thead>
+                    <tbody className="divide-y divide-line">
+                      {bp.features.map((x) => (
+                        <tr key={x.key}>
+                          <td className="px-5 py-2"><span className="font-medium">{x.recommendation}</span><span className="block text-faint">{x.gap} · {x.engine} · {x.priority}</span></td>
+                          <td className="px-2 py-2">{x.page}<span className="block text-faint">{x.component}</span></td>
+                          <td className="px-2 py-2"><Badge tone={FEATURE[x.status][1]}>{FEATURE[x.status][0]}</Badge></td>
+                          <td className="px-5 py-2 text-muted">{x.note || (x.dependencies.length ? `Needs: ${x.dependencies.join("; ")}` : "—")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            )}
 
             <Card title="Gap to growth" description={plan ? `Built ${when(plan.built_at)}. Internal: evidence can name competitors and never appears in the client preview.` : undefined}>
               {!plan ? <p className="text-sm text-muted">This preview predates growth plans. Use “Refresh growth plan” to map its gaps to Growth Engines; your text edits are kept.</p> : (

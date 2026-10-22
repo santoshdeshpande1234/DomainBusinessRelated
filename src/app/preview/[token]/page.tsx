@@ -38,7 +38,7 @@ const load = cache(async (token: string, version: number | null) => {
   return { row, shown, internal, owner: ws?.name ?? "Domain2Revenue", domain: domain?.name ?? null };
 });
 
-type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ view?: string; v?: string }> };
+type Props = { params: Promise<{ token: string }>; searchParams: Promise<{ view?: string; v?: string; page?: string }> };
 const versionOf = (v?: string) => (v && /^\d{1,6}$/.test(v) ? Number(v) : null);
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
@@ -55,12 +55,14 @@ export default async function PreviewPage({ params, searchParams }: Props) {
   if (!r || !r.shown.content?.brand) notFound();
   const q = version ? `&v=${version}` : "";
   const links = { site: `/preview/${token}${version ? `?v=${version}` : ""}`, plan: `/preview/${token}?view=plan${q}` };
+  const slug = sp.page && /^[a-z0-9-]{1,60}$/.test(sp.page) ? sp.page : null;
+  const pageHref = (s: string) => (s === "home" ? links.site : `/preview/${token}?page=${s}${q}`);
   return (
     <>
       {r.internal && !r.row.share_enabled && <div className="bg-amber-100 px-4 py-1.5 text-center text-xs text-amber-950 print:hidden">Private draft: only your workspace can open this link until sharing is turned on.</div>}
       {r.shown.version && <div className="bg-sky-100 px-4 py-1.5 text-center text-xs text-sky-950 print:hidden">Saved version {r.shown.version}, visible to your workspace only.</div>}
       <SitePreview content={r.shown.content as SiteContent} theme={r.shown.theme} layout={r.shown.layout} domain={r.domain} owner={r.owner} year={new Date().getUTCFullYear()}
-        view={sp.view === "plan" ? "plan" : "site"} links={links} />
+        view={sp.view === "plan" ? "plan" : "site"} links={links} page={slug} pageHref={pageHref} />
     </>
   );
 }

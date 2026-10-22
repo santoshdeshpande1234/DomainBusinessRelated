@@ -4,6 +4,7 @@
 import { PLACEHOLDER, THEMES, jsonLd, type SiteContent, type ThemeKey } from "@/lib/studio/site";
 import { Assistant, QualifyForm, ServiceFinder } from "@/components/preview-demos";
 import { GrowthPlanView } from "@/components/growth-plan";
+import { PageView, Sections } from "@/components/site-pages";
 
 function T({ children }: { children: string }) {
   if (!PLACEHOLDER.test(children)) return <>{children}</>;
@@ -11,12 +12,21 @@ function T({ children }: { children: string }) {
     ? <mark key={i} className="rounded bg-amber-200 px-1 text-amber-950">{part.slice(2, -2)}</mark> : part)}</>;
 }
 
-export function SitePreview({ content: c, theme, layout, domain, owner, year, view = "site", links }: {
+export function SitePreview({ content: c, theme, layout, domain, owner, year, view = "site", links, page, pageHref }: {
   content: SiteContent; theme: string; layout: string; domain: string | null; owner: string; year: number;
   view?: "site" | "plan"; links?: { site: string; plan: string };
+  /** Multi-page previews: the page to show and how to link to another page. */
+  page?: string | null; pageHref?: (slug: string) => string;
 }) {
   const t = THEMES[(theme in THEMES ? theme : "harbor") as ThemeKey];
-  const vars = { "--ink": t.ink, "--accent": t.accent, "--soft": t.soft, fontFamily: t.font } as React.CSSProperties;
+  // Their own brand colours, when we found them, win over the theme's.
+  const own = c.brand.colors;
+  const vars = { "--ink": own?.ink ?? t.ink, "--accent": own?.accent ?? t.accent, "--soft": own?.accent ? `color-mix(in srgb, ${own.accent} 10%, white)` : t.soft, fontFamily: t.font } as React.CSSProperties;
+  const multi = !!(c.pages?.length && pageHref);
+  const href = (slug: string) => (multi ? pageHref!(slug) : slug === "home" ? "#top" : `#${slug === "contact" ? "contact" : slug}`);
+  const current = multi && page && page !== "home" ? c.pages!.find((p) => p.slug === page) ?? null : null;
+  const homePage = c.pages?.find((p) => p.slug === "home");
+  const navPages = multi ? c.pages!.filter((p) => p.nav && p.slug !== "home") : [];
   const tel = c.contact.phone ? `tel:${c.contact.phone.replace(/[^\d+]/g, "")}` : null;
   const centered = layout === "centered";
   const sec = c.sections;
@@ -37,18 +47,23 @@ export function SitePreview({ content: c, theme, layout, domain, owner, year, vi
       {plan ? <GrowthPlanView c={c} owner={owner} siteHref={links?.site ?? "#"} /> : <>
       <header className="border-b border-neutral-200">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <a href="#top" className="text-lg font-semibold tracking-tight">{c.brand.name}</a>
-          <nav aria-label="Main" className="flex flex-wrap items-center gap-5 text-sm">
+          <a href={href("home")} className="flex items-center gap-3 text-lg font-semibold tracking-tight">
+            {/* eslint-disable-next-line @next/next/no-img-element -- their own logo, loaded from their site */}
+            {c.brand.logo && <img src={c.brand.logo} alt="" referrerPolicy="no-referrer" className="h-9 w-auto max-w-[140px] object-contain" />}
+            {c.brand.name}
+          </a>
+          <nav aria-label="Main" className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+            {multi ? navPages.map((p) => <a key={p.slug} href={href(p.slug)} aria-current={page === p.slug ? "page" : undefined} className={`hover:underline ${page === p.slug ? "font-semibold" : ""}`}>{p.nav}</a>) : <>
             <a href="#services" className="hover:underline">Services</a>
             <a href="#about" className="hover:underline">About</a>
             {sec?.faq && c.faq?.length ? <a href="#faq" className="hover:underline">FAQ</a> : null}
-            <a href="#contact" className="hover:underline">Contact</a>
+            <a href="#contact" className="hover:underline">Contact</a></>}
             {tel && <a href={tel} className="rounded-full bg-[color:var(--accent)] px-4 py-2 font-medium text-white">{c.contact.phone}</a>}
           </nav>
         </div>
       </header>
 
-      <main id="top">
+      {current ? <PageView c={c} p={current} href={href} tel={tel} /> : <main id="top">
         <section className="bg-[color:var(--soft)]">
           <div className={`mx-auto grid max-w-6xl gap-10 px-5 py-16 sm:py-24 ${centered ? "text-center" : "lg:grid-cols-[1.3fr_1fr] lg:items-center"}`}>
             <div className={centered ? "mx-auto max-w-3xl" : ""}>
@@ -75,12 +90,14 @@ export function SitePreview({ content: c, theme, layout, domain, owner, year, vi
               <li key={i} className="rounded-2xl border border-neutral-200 p-6">
                 <h3 className="font-semibold"><T>{s.title}</T></h3>
                 {s.text && <p className="mt-2 text-sm text-neutral-600"><T>{s.text}</T></p>}
-                <a href="#contact" className="mt-4 inline-block text-sm font-medium text-[color:var(--accent)]">Ask about this →</a>
+                <a href={multi && s.slug ? href(s.slug) : "#contact"} className="mt-4 inline-block text-sm font-medium text-[color:var(--accent)]">{multi && s.slug ? "Learn more →" : "Ask about this →"}</a>
               </li>
             ))}
           </ul>
           {sec?.finder && c.finder && c.finder.options.length >= 2 && <div className="mt-10"><ServiceFinder question={c.finder.question} options={c.finder.options} /></div>}
         </section>
+
+        {multi && homePage && <Sections c={c} sections={homePage.sections.filter((x) => x.type === "text" || x.type === "list")} href={href} tel={tel} />}
 
         {sec?.differentiation && c.features.length > 0 && (
           <section className="mx-auto max-w-6xl px-5 pb-16">
@@ -150,13 +167,13 @@ export function SitePreview({ content: c, theme, layout, domain, owner, year, vi
             )}
           </div>
         </section>
-      </main>
+      </main>}
 
       <footer className="border-t border-neutral-200">
         {c.growth && (
           <div className="mx-auto grid max-w-6xl gap-6 px-5 pt-8 text-sm sm:grid-cols-3">
             <div><p className="font-semibold">{c.brand.name}</p>{c.contact.address && <p className="mt-1 text-neutral-600">{c.contact.address}</p>}</div>
-            <nav aria-label="Footer" className="flex flex-col gap-1 text-neutral-600"><a href="#services">Services</a><a href="#about">About</a>{sec?.faq && <a href="#faq">FAQ</a>}<a href="#contact">Contact</a></nav>
+            <nav aria-label="Footer" className="flex flex-col gap-1 text-neutral-600">{multi ? navPages.map((p) => <a key={p.slug} href={href(p.slug)}>{p.nav}</a>) : <><a href="#services">Services</a><a href="#about">About</a>{sec?.faq && <a href="#faq">FAQ</a>}<a href="#contact">Contact</a></>}</nav>
             <div className="text-neutral-600">{c.contact.phone && <p><a href={tel!}>{c.contact.phone}</a></p>}{c.contact.email && <p>{c.contact.email}</p>}</div>
           </div>
         )}
