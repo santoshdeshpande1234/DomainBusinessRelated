@@ -75,7 +75,10 @@ export async function searchProspects(campaignId: string): Promise<StepResult> {
     const budget = prospectBudgetUsd(c);
     const spent = await campaignSpendUsd(c.id);
     if (spent + PLACES_COST_PER_REQUEST_USD > budget + 1e-9) {
-      return { error: `The prospect budget (about $${budget.toFixed(2)}) is used up: $${spent.toFixed(2)} estimated so far. Raise it on the campaign to continue.` };
+      const capped = c.limits?.max_api_spend_usd != null && Number(c.limits.max_api_spend_usd) < Number(c.prospect_budget) * Number(c.fx.usd_per_unit);
+      return { error: capped
+        ? `The campaign's "Max API spend" limit is $${Number(c.limits.max_api_spend_usd).toFixed(2)} and $${spent.toFixed(2)} is estimated so far. Raise it, or clear it to use the prospect budget, by editing the campaign.`
+        : `The prospect budget (about $${budget.toFixed(2)}) is used up: $${spent.toFixed(2)} estimated so far. Raise it on the campaign to continue.` };
     }
 
     const where = [c.service_area || c.city, c.region, c.country].filter(Boolean).join(", ");
