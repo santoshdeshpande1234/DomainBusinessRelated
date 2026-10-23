@@ -28,6 +28,8 @@ export type Brand = {
 export type Inventory = {
   root: string; crawled_at: string; brand: Brand; sitemap: boolean; robots: boolean;
   pages: PageRecord[]; queue: string[]; discovered: number;
+  /** Crawler version that built it; older inventories are rebuilt. Missing on the first version. */
+  version?: number;
 };
 
 export const MAX_PAGES = 12;
@@ -78,20 +80,45 @@ export function parseSitemap(xml: string, base: string): { urls: string[]; neste
     : { urls: locs.map((l) => sameSite(l, base)).filter((x): x is string => !!x), nested: [] };
 }
 
-/** Disallowed path prefixes for every crawler ("*") or for us. */
-export function robotsDisallow(txt: string): string[] {
-  const out: string[] = [];
-  let applies = false;
+export type RobotsRule = { allow: boolean; path: string };
+
+/**
+ * Allow and Disallow rules that apply to every crawler ("*") or to us, read group by group (consecutive
+ * User-agent lines share the rules that follow them).
+ */
+export function robotsRules(txt: string): RobotsRule[] {
+  const out: RobotsRule[] = [];
+  let applies = false, agents = false;
   for (const raw of txt.split(/\r?\n/)) {
     const line = raw.replace(/#.*/, "").trim();
     const [k, ...rest] = line.split(":");
     const v = rest.join(":").trim();
-    if (/^user-agent$/i.test(k)) applies = v === "*" || /domain2revenue/i.test(v);
-    else if (applies && /^disallow$/i.test(k) && v) out.push(v);
+    if (/^user-agent$/i.test(k)) {
+      if (!agents) applies = false;
+      applies ||= v === "*" || /domain2revenue/i.test(v);
+      agents = true;
+    } else if (/^(allow|disallow)$/i.test(k)) {
+      agents = false;
+      if (applies && v) out.push({ allow: /^allow$/i.test(k), path: v });
+    } else if (line) agents = false;
   }
   return out;
 }
-export const allowed = (url: string, disallow: string[]) => { const p = new URL(url).pathname; return !disallow.some((d) => p.startsWith(d.replace(/\*.*$/, ""))); };
+
+/** A robots.txt path pattern as a regex: "*" matches anything, a trailing "$" anchors the end. */
+const pattern = (p: string) => new RegExp(`^${p.replace(/\$$/, "").replace(/[.+?^{}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}${p.endsWith("$") ? "$" : ""}`);
+
+/** Whether robots rules let us read a URL: the longest matching rule wins, and Allow wins a tie (as Google reads them). */
+export const allowed = (url: string, rules: RobotsRule[]) => {
+  const u = new URL(url);
+  const target = u.pathname + u.search;
+  let best: RobotsRule | null = null;
+  for (const r of rules) {
+    if (!pattern(r.path).test(target)) continue;
+    if (!best || r.path.length > best.path.length || (r.path.length === best.path.length && r.allow)) best = r;
+  }
+  return !best || best.allow;
+};
 
 const KINDS: [PageKind, RegExp][] = [
   ["legal", /privacy|terms|cookie|disclaimer|legal|refund-policy|gdpr|sitemap/],
@@ -224,16 +251,32 @@ export function extractSocial(html: string): Social[] {
 }
 
 /** Which discovered pages to read, within the page budget: navigation first, then the sitemap. */
-export function pickPages(home: string, links: { url: string; nav: boolean }[], sitemap: string[], disallow: string[], max = MAX_PAGES): string[] {
+export function pickPages(home: string, links: { url: string; nav: boolean }[], sitemap: string[], rules: RobotsRule[], max = MAX_PAGES): string[] {
   const seen = new Set([home]);
   const out: string[] = [];
   const kindOk = (u: string) => !["legal", "account"].includes(classify(u, null));
-  const push = (u: string) => { if (!seen.has(u) && out.length < max - 1 && allowed(u, disallow) && kindOk(u)) { seen.add(u); out.push(u); } };
+  const push = (u: string) => { if (!seen.has(u) && out.length < max - 1 && allowed(u, rules) && kindOk(u)) { seen.add(u); out.push(u); } };
+  // A listed address deep inside a site (a location or landing page): their real home page is read first.
+  const root = new URL(home).origin + "/";
+  if (home !== root) push(root);
   links.filter((l) => l.nav).forEach((l) => push(l.url));
   // Then sitemap pages, shallow paths first (service and about pages before blog posts).
   [...sitemap].sort((a, b) => new URL(a).pathname.split("/").length - new URL(b).pathname.split("/").length).forEach(push);
   links.filter((l) => !l.nav).forEach((l) => push(l.url));
   return out;
+}
+
+/**
+ * Whether the read covered enough of their site to rebuild it. Information the site simply doesn't publish
+ * (prices, FAQs) is not a problem with the read; failing to follow its links, or losing many pages, is.
+ */
+export function readProblem(inv: Inventory): string | null {
+  const read = inv.pages.filter((p) => p.status === "extracted").length;
+  const lost = inv.pages.length - read;
+  if (inv.queue.length) return null;
+  if (read <= 1 && inv.discovered > 1) return `Only ${read ? "the first page" : "no page"} could be read of ${inv.discovered} discovered; check the website address or whether the site blocks automated reading.`;
+  if (lost * 3 > inv.pages.length) return `${lost} of ${inv.pages.length} pages could not be loaded.`;
+  return null;
 }
 
 /** Facts across all pages, for the "what we couldn't find" list. */

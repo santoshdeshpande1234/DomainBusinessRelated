@@ -6,7 +6,7 @@ import { requirePerm } from "@/lib/session";
 import { userClient } from "@/lib/supabase/server";
 import { auditWebsite, loadCampaign, rescoreProspects, saveAudit } from "@/lib/discovery/service";
 import { crawlStep } from "@/lib/studio/crawl";
-import { missingInfo, type Inventory } from "@/lib/studio/inventory";
+import { missingInfo, readProblem, type Inventory } from "@/lib/studio/inventory";
 import type { GrowthPlan } from "@/lib/studio/growth";
 import { INDUSTRIES, labelOf } from "@/lib/options";
 import type { Audit } from "@/lib/discovery/prospects";
@@ -127,12 +127,14 @@ export async function crawlPreview(campaignId: string, prospectId: string, refre
     const r = await crawlStep(x.db, { workspace_id: x.c.workspace_id, campaign_id: x.c.id, prospect_id: x.p.id, website: x.p.website, userId: x.s.userId }, refresh);
     const read = r.inventory.pages.filter((p) => p.status === "extracted").length;
     const failed = r.inventory.pages.filter((p) => p.status !== "extracted").length;
-    const missing = missingInfo(r.inventory);
+    // Things their site doesn't publish are information, not a failed read; the unreadable count is reported separately.
+    const missing = missingInfo(r.inventory).filter((m) => !/could not be loaded/.test(m));
+    const problem = readProblem(r.inventory);
     done(campaignId, prospectId);
     return {
       ok: r.remaining ? `Read ${r.inventory.pages.length} page(s) so far.` : "Website read.", remaining: r.remaining,
-      stages: [{ key: "inventory", status: r.remaining ? "done" : failed || missing.length ? "partial" : "done",
-        note: `${r.reused ? "Reused the page inventory from the last 30 days. " : ""}${read} page(s) read${failed ? `, ${failed} unreadable` : ""} of ${r.inventory.discovered} discovered${r.inventory.sitemap ? " (sitemap used)" : ""}${r.remaining ? `; ${r.remaining} still queued` : ""}.${missing.length ? ` Not found: ${missing.join(", ")}.` : ""}`.slice(0, 300) }],
+      stages: [{ key: "inventory", status: problem ? "partial" : "done",
+        note: `${problem ? `${problem} ` : ""}${r.reused ? "Reused the page inventory from the last 30 days. " : ""}${read} page(s) read${failed ? `, ${failed} unreadable` : ""} of ${r.inventory.discovered} discovered${r.inventory.sitemap ? " (sitemap used)" : ""}${r.remaining ? `; ${r.remaining} still queued` : ""}.${missing.length ? ` Not published on their site: ${missing.join(", ")}.` : ""}`.slice(0, 300) }],
     };
   } catch (e) {
     return { error: (e as Error).message, stages: [{ key: "inventory", status: "partial", note: `Pages could not be read (${(e as Error).message}); the home-page check is used instead.`.slice(0, 300) }] };

@@ -1,7 +1,7 @@
 import "server-only";
 import { userClient } from "@/lib/supabase/server";
 import { fetchPublicPage } from "@/lib/discovery/net";
-import { classify, discoverLinks, sameSite, extractBrand, extractPage, parseSitemap, pickPages, robotsDisallow, type Inventory, type PageRecord } from "./inventory";
+import { classify, discoverLinks, sameSite, extractBrand, extractPage, parseSitemap, pickPages, robotsRules, type Inventory, type PageRecord } from "./inventory";
 
 type Db = Awaited<ReturnType<typeof userClient>>;
 
@@ -9,6 +9,12 @@ type Db = Awaited<ReturnType<typeof userClient>>;
 const PER_STEP = 4;
 /** Inventories older than this are rebuilt. */
 export const INVENTORY_MAX_AGE_DAYS = 30;
+/**
+ * Bumped when reading improves, so inventories built by an older crawler are rebuilt on the next run.
+ * 2: robots.txt wildcards read correctly (a rule like "Disallow: /*?preview" no longer blocks the whole
+ * site) and a listed address deep inside a site also reads the site's home page.
+ */
+export const CRAWLER_VERSION = 2;
 
 const get = async (url: string, timeoutMs = 5000) => {
   try { return await fetchPublicPage(url, { timeoutMs, maxBytes: 1_200_000 }); } catch { return null; }
@@ -35,13 +41,14 @@ export async function crawlStep(db: Db, ctx: { workspace_id: string; campaign_id
   let inv = row?.inventory as Inventory | undefined;
   const age = row?.crawled_at ? (Date.now() - new Date(row.crawled_at).getTime()) / 86_400_000 : Infinity;
 
-  if (!inv || refresh || (age > INVENTORY_MAX_AGE_DAYS && !inv.queue.length)) {
+  const outdated = !!inv && (inv.version ?? 1) < CRAWLER_VERSION;
+  if (!inv || refresh || outdated || (age > INVENTORY_MAX_AGE_DAYS && !inv.queue.length)) {
     const home = await get(ctx.website, 6000);
     if (!home || home.status >= 400) throw new Error(home ? `Their home page returned HTTP ${home.status}.` : "Their home page could not be loaded.");
     const root = new URL(home.finalUrl).origin;
     const robots = await get(`${root}/robots.txt`, 3000);
     const robotsTxt = robots && robots.status < 400 && !/<html/i.test(robots.html) ? robots.html : "";
-    const disallow = robotsDisallow(robotsTxt);
+    const rules = robotsRules(robotsTxt);
     const mapUrl = robotsTxt.match(/^sitemap:\s*(\S+)/im)?.[1] ?? `${root}/sitemap.xml`;
     let sitemap: string[] = [];
     const sm = await get(mapUrl, 4000);
@@ -51,10 +58,12 @@ export async function crawlStep(db: Db, ctx: { workspace_id: string; campaign_id
       if (parsed.nested[0]) { const nested = await get(parsed.nested[0], 4000); if (nested && nested.status < 400) sitemap = parseSitemap(nested.html, root).urls; }
     }
     const links = discoverLinks(home.html, home.finalUrl);
-    const queue = pickPages(sameSite(home.finalUrl, home.finalUrl) ?? home.finalUrl, links, sitemap, disallow);
+    const listed = sameSite(home.finalUrl, home.finalUrl) ?? home.finalUrl;
+    const queue = pickPages(listed, links, sitemap, rules);
     inv = {
       root, crawled_at: new Date().toISOString(), brand: extractBrand(home.html, home.finalUrl), sitemap: sitemap.length > 0, robots: !!robotsTxt,
-      pages: [extractPage(home.html, home.finalUrl, "home")], queue, discovered: new Set([...links.map((l) => l.url), ...sitemap]).size,
+      pages: [extractPage(home.html, home.finalUrl, classify(listed, null))], queue, discovered: new Set([...links.map((l) => l.url), ...sitemap]).size,
+      version: CRAWLER_VERSION,
     };
   } else if (inv.queue.length) {
     const batch = inv.queue.slice(0, PER_STEP);
@@ -69,5 +78,5 @@ export async function crawlStep(db: Db, ctx: { workspace_id: string; campaign_id
     ? await db.from("site_inventories").update(payload).eq("id", row.id)
     : await db.from("site_inventories").insert({ ...payload, created_by: ctx.userId });
   if (error) throw new Error(error.message);
-  return { inventory: inv, remaining: inv.queue.length, reused: !!row && !refresh && age <= INVENTORY_MAX_AGE_DAYS && !row.inventory.queue?.length };
+  return { inventory: inv, remaining: inv.queue.length, reused: !!row && !refresh && !outdated && age <= INVENTORY_MAX_AGE_DAYS && !row.inventory.queue?.length };
 }
