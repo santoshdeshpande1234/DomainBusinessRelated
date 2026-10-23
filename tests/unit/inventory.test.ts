@@ -4,6 +4,9 @@ import { buildBlueprint } from "@/lib/studio/blueprint";
 import { buildPlan } from "@/lib/studio/growth";
 import { compose } from "@/lib/studio/compose";
 import { validateSite } from "@/lib/studio/site";
+import { qualityGate } from "@/lib/studio/quality";
+import { FIXTURE_KEYS, fixtureSite } from "@/lib/studio/fixtures";
+import { contrast, defaultDirection, derivePalette, DIRECTION_KEYS, resolveDirection } from "@/lib/studio/design";
 import type { Audit } from "@/lib/discovery/prospects";
 
 const B = "https://smile.example/";
@@ -110,9 +113,10 @@ describe("blueprint", () => {
     expect(by("/")).toMatchObject({ action: "improved", target: "home" });
     expect(by("/about-us")).toMatchObject({ action: "improved", target: "about" });
     expect(by("/services/dental-implants")).toMatchObject({ action: "improved", target: "service-dental-implants" });
-    expect(by("/blog/brushing-tips")).toMatchObject({ action: "merged", target: "resources" });
-    expect(by("/testimonials").reason).toMatch(/Linked, not copied/);
-    expect(by("/careers")).toMatchObject({ action: "excluded" });
+    expect(by("/blog/brushing-tips")).toMatchObject({ action: "improved", target: "article-five-brushing-tips" });
+    // No customer quotes on their testimonials page, so nothing is copied or invented.
+    expect(by("/testimonials")).toMatchObject({ action: "excluded" });
+    expect(by("/careers")).toMatchObject({ action: "preserved", target: "careers" });
     expect(by("/gallery-old")).toMatchObject({ action: "excluded" });
     expect(bp.originals.every((o) => o.reason.length > 0)).toBe(true);
   });
@@ -124,7 +128,16 @@ describe("blueprint", () => {
     const json = JSON.stringify(bp.pages);
     expect(json).toMatch(/Dr Rao opened Smile Studio/);
     expect(json).toMatch(/Implant consultation ₹ 1,500/);
-    expect(json).not.toMatch(/Bright Teeth|Award-winning|hiring/);
+    expect(json).not.toMatch(/Bright Teeth|Award-winning|"testimonials"/);
+    // Their careers page is kept on-site, out of the main menu, and articles become pages of this site.
+    expect(bp.pages.find((p) => p.slug === "careers")).toMatchObject({ nav: null });
+    expect(json).toMatch(/We are hiring a dental assistant/);
+    expect(bp.pages.find((p) => p.slug === "resources")!.sections[0]).toMatchObject({ type: "articles", items: [{ slug: "article-five-brushing-tips" }] });
+    const slugs = new Set(bp.pages.map((p) => p.slug));
+    for (const p of bp.pages) for (const s of p.sections) if (s.type === "cta") {
+      expect(slugs.has(s.target!)).toBe(true);
+      if (s.secondary) expect(slugs.has(s.secondary.target)).toBe(true);
+    }
     expect(bp.review.join(" ")).toMatch(/mention another business/);
     expect(bp.review.join(" ")).toMatch(/Trust claim .*Award-winning/);
   });
@@ -183,5 +196,123 @@ describe("generation with the inventory and the saved plan", () => {
 
   it("reports what the inventory couldn't find", () => {
     expect(missingInfo(inventory())).toEqual(["FAQs", "Contact details on the website", "1 page(s) could not be loaded"]);
+  });
+});
+
+describe("social profiles, imagery and quotes", () => {
+  it("keeps official profiles and the share image, never share buttons", () => {
+    const html = `<head><meta property="og:image" content="/img/hero.jpg"></head><body>
+      <a href="https://www.facebook.com/sharer/sharer.php?u=x">Share</a><a href="https://www.facebook.com/smilestudio/">Facebook</a>
+      <a href="https://instagram.com/p/abc">Post</a><a href="https://www.instagram.com/smilestudio">Instagram</a>
+      <a href="https://twitter.com/intent/tweet?text=x">Tweet</a><a href="https://www.linkedin.com/company/smile-studio">LinkedIn</a></body>`;
+    const b = extractBrand(html, B);
+    expect(b.image).toBe("https://smile.example/img/hero.jpg");
+    expect(b.social).toEqual([
+      { network: "facebook", url: "https://www.facebook.com/smilestudio" },
+      { network: "instagram", url: "https://www.instagram.com/smilestudio" },
+      { network: "linkedin", url: "https://www.linkedin.com/company/smile-studio" },
+    ]);
+  });
+
+  it("captures customer quotes word for word, only from quotes", () => {
+    const p = extractPage(`<main><h1>Reviews</h1><p>"The team explained everything and the implant feels natural."</p><p>Patients say lovely things.</p></main>`, B + "testimonials", "testimonials");
+    expect(p.quotes).toEqual(['"The team explained everything and the implant feels natural."']);
+    expect(extractPage(HOME, B, "home").quotes).toEqual(["Dr Rao made my visit painless and quick, highly recommended!"]);
+  });
+
+  it("puts quotes on a testimonials page and the home page, each credited to its source", () => {
+    const inv = inventory();
+    inv.pages = inv.pages.map((p) => p.kind === "testimonials" ? { ...p, quotes: ["“Gentle, quick and clear about every cost.” – Priya"] } : p);
+    const bp = buildBlueprint(inv, plan(), facts);
+    expect(bp.originals.find((o) => o.url.endsWith("/testimonials"))).toMatchObject({ action: "improved", target: "testimonials" });
+    const proof = bp.pages.find((p) => p.slug === "testimonials")!.sections.find((s) => s.type === "proof");
+    expect(proof).toMatchObject({ kind: "quotes", attributed: [{ text: "“Gentle, quick and clear about every cost.” – Priya", source: "https://smile.example/testimonials" }] });
+    expect(bp.review.join(" ")).toMatch(/word for word/);
+  });
+
+  it("shows only specific, published credentials, never vague or numeric claims", () => {
+    const inv = inventory();
+    inv.pages[0] = { ...inv.pages[0], claims: ["Award-winning team", "Trusted by 5000+ patients", "Registered with the Maharashtra State Dental Council"] };
+    const bp = buildBlueprint(inv, plan(), facts);
+    const about = bp.pages.find((p) => p.slug === "about")!.sections.find((s) => s.type === "proof");
+    expect(about).toMatchObject({ kind: "credentials", attributed: [{ text: "Registered with the Maharashtra State Dental Council", source: B }] });
+  });
+});
+
+describe("hero and quality gate", () => {
+  const input = () => ({
+    facts: { id: "p1", name: "Smile Studio", category: "Dentist", city: "Pune", industry: "healthcare", industryLabel: "Healthcare", phone: "+91 20 1111 2222",
+      email: null, address: "1 FC Road, Pune", maps_url: null, website: B, audit: audit() },
+    reviews: null, competitors: [], others: ["Bright Teeth Clinic"], mode: "site" as const, inventory: inventory(), now: new Date("2026-10-22T00:00:00Z"),
+  });
+  const built = () => { const r = compose(input()); if (!r.ok) throw new Error(r.error); return r; };
+
+  it("leads with their own home-page headline", () => {
+    expect(built().content.hero.headline).toBe("Gentle dental care in Pune");
+  });
+
+  it("passes a complete site and reports browser checks as not run", () => {
+    const r = built();
+    const q = qualityGate(r.content, { blueprint: r.blueprint, others: ["Bright Teeth Clinic"] });
+    const st = (k: string) => q.checks.find((c) => c.key === k)!.status;
+    for (const k of ["navigation", "cta", "primary_cta", "interactive", "forms", "contrast", "context"]) expect(st(k), k).toBe("pass");
+    expect(st("browser")).toBe("not_run");
+    expect(q.ready).toBe(true);
+    expect(q.score).toBeGreaterThanOrEqual(80);
+    expect(q.summary).toMatch(/1 not run here/);
+    expect(r.stages.find((s) => s.key === "validate")!.note).toMatch(/^Quality gate/);
+  });
+
+  it("fails a dead call to action, a missing service page and unsourced proof", () => {
+    const c = structuredClone(built().content);
+    c.pages![0].sections.push({ type: "cta", heading: "Go", text: "x", target: "nowhere" });
+    c.services[0].slug = "service-missing";
+    c.pages![0].sections.push({ type: "proof", kind: "quotes", attributed: [{ text: "Brilliant", source: "https://elsewhere.example/" }] });
+    const q = qualityGate(c);
+    const st = (k: string) => q.checks.find((x) => x.key === k)!.status;
+    expect([st("cta"), st("interactive"), st("proof")]).toEqual(["fail", "fail", "fail"]);
+    expect(q.ready).toBe(false);
+    expect(q.score).toBeLessThanOrEqual(59);
+  });
+});
+
+describe("design system", () => {
+  it("uses the brand colour, deepening it when white text wouldn't be readable", () => {
+    const p = derivePalette({ brand: "#38bdf8", industry: "healthcare" });
+    expect(p.source).toBe("brand");
+    expect(contrast(p.tokens.primary, "#ffffff")).toBeGreaterThanOrEqual(4.5);
+    expect(p.notes.join(" ")).toMatch(/deepened/);
+    expect(p.tokens.secondary).toBe("#38bdf8");
+  });
+  it("falls back to an industry palette for a grey brand colour, and every pair meets AA", () => {
+    for (const industry of ["healthcare", "professional_services", "hospitality", "it", "home_services", "retail", null]) {
+      const p = derivePalette({ brand: "#777777", industry });
+      expect(p.source).toBe("industry");
+      const t = p.tokens;
+      expect(contrast(t.primary, t.onPrimary)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.accent, t.onAccent)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.body, t.bg)).toBeGreaterThanOrEqual(7);
+      expect(contrast(t.muted, t.bg)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t.onDark, t.dark)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+  it("maps older theme names to a direction and defaults by industry", () => {
+    expect(resolveDirection("atelier")).toEqual({ key: "editorial", legacy: "atelier" });
+    expect(resolveDirection("bold")).toEqual({ key: "bold", legacy: null });
+    expect(resolveDirection(null, "legal").key).toBe(defaultDirection("legal"));
+    expect(DIRECTION_KEYS).toEqual(["corporate", "minimal", "bold", "specialist", "editorial"]);
+  });
+});
+
+describe("sample businesses across industries", () => {
+  it.each(FIXTURE_KEYS)("%s builds and passes every required quality check", (key) => {
+    const f = fixtureSite(key)!;
+    const q = qualityGate(f.content, { others: ["Bright Teeth Clinic"] });
+    expect(q.checks.filter((c) => c.critical && c.status === "fail").map((c) => `${c.key}: ${c.detail}`)).toEqual([]);
+    expect(JSON.stringify(f.content)).not.toMatch(/Bright Teeth/);
+  });
+  it("gives a business that already takes bookings a booking flow", () => {
+    const f = fixtureSite("dentist")!;
+    expect(f.content.pages!.find((p) => p.slug === "book")!.sections.map((s) => s.type)).toContain("booking");
   });
 });

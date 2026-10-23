@@ -19,6 +19,7 @@ import { PipelineButton, StageList } from "./pipeline";
 import { PreviewWorkspace } from "./workspace";
 import { RefinePanel, RestoreButton } from "./refine";
 import { newLink, setPreviewStatus, setSharing } from "./actions";
+import { DesignCard, QualityCard } from "./quality";
 
 export const metadata = { title: "Website studio" };
 const TONE: Record<string, Tone> = { draft: "neutral", ready: "good", archived: "neutral" };
@@ -33,14 +34,18 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
   const { id, prospectId } = await params;
   const s = await getSession();
   const db = await userClient();
-  const [{ data: p }, { data: c }, { data: w }, { data: domains = [] }, { data: fm }, { data: invRow }] = await Promise.all([
+  const [{ data: p }, { data: c }, { data: w }, { data: domains = [] }, { data: fm }, { data: invRow }, { data: rivals = [] }, { data: peers = [] }] = await Promise.all([
     db.from("prospects").select("id, name, website").eq("id", prospectId).eq("campaign_id", id).maybeSingle(),
     db.from("campaigns").select("name, currency").eq("id", id).maybeSingle(),
     db.from("website_previews").select("*").eq("prospect_id", prospectId).maybeSingle(),
     db.from("domains").select("id, name, status").eq("campaign_id", id).in("status", ["shortlisted", "approved"]).order("score", { ascending: false }).limit(100),
     db.from("financial_models").select("model, inputs").eq("prospect_id", prospectId).maybeSingle(),
     db.from("site_inventories").select("status, crawled_at, inventory").eq("prospect_id", prospectId).maybeSingle(),
+    db.from("competitors").select("name").eq("prospect_id", prospectId),
+    db.from("prospects").select("name").eq("campaign_id", id).neq("id", prospectId),
   ]);
+  // Names the client-facing preview must never mention (as in generation).
+  const others = [...peers!.map((n) => n.name), ...rivals!.map((n) => n.name)];
   const inv = (invRow?.inventory as Inventory | undefined)?.pages ? (invRow!.inventory as Inventory) : null;
   if (!p || !c) notFound();
   const { data: versions = [] } = w
@@ -76,6 +81,8 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
             <Card title="Preview" description={`Previewing ${p.name}. Proposed redesign, not their live website.`}>
               <PreviewWorkspace token={w.token} name={p.name} currentSite={p.website} hasPlan={!!content.growth} versions={versions!.map((v) => ({ version: v.version, reason: v.reason, at: v.created_at }))} pages={(content.pages ?? []).map((x) => ({ slug: x.slug, title: x.title }))} />
             </Card>
+
+            <QualityCard content={content} blueprint={bp ?? null} others={others} />
 
             {plan?.advantage ? <CompetitivePosition a={plan.advantage} /> : plan && <Card title="Competitive position"><p className="text-sm text-muted">This plan predates competitive positions. Use “Refresh growth plan” to assess where {p.name} is ahead or behind nearby businesses.</p></Card>}
 
@@ -187,6 +194,8 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
                 )}
               </div>
             </Card>
+
+            <DesignCard campaignId={id} prospectId={prospectId} theme={w.theme} content={content} write={write} />
 
             {plan && (
               <Card title="Business summary" description="For your call preparation. Internal.">

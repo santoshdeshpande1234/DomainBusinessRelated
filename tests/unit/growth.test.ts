@@ -154,7 +154,7 @@ describe("refinements", () => {
   const base = () => { const r = compose(input()); if (!r.ok) throw new Error(r.error); return r.content; };
   const opts = { name: "Smile Studio", heroTemplate: "Book your visit to {name} in a minute" };
   it("changes design, emphasis and sections without adding facts", () => {
-    expect(refine(base(), "premium", opts)).toMatchObject({ theme: "atelier", layout: "centered" });
+    expect(refine(base(), "premium", opts)).toMatchObject({ theme: "corporate", layout: "split" });
     const h = refine(base(), "hero", opts);
     if ("error" in h) throw new Error(h.error);
     expect(h.content.hero.headline).toBe("Book your visit to Smile Studio in a minute");

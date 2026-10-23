@@ -2,7 +2,8 @@
 import { useActionState } from "react";
 import { Submit, useKeepValues } from "@/components/submit";
 import { Result } from "@/components/result";
-import { LAYOUTS, THEMES, type SiteContent } from "@/lib/studio/site";
+import { LAYOUTS, type SiteContent } from "@/lib/studio/site";
+import { DIRECTIONS, DIRECTION_KEYS, isDirection, resolveDirection } from "@/lib/studio/design";
 import { saveContent } from "./actions";
 
 function F({ name, label, value, hint, rows, max }: { name: string; label: string; value: string; hint?: string; rows?: number; max?: number }) {
@@ -22,8 +23,12 @@ export function Editor({ campaignId, prospectId, content: c, theme, layout, doma
   return (
     <form onSubmit={useKeepValues(dispatch)} className="grid gap-4">
       <div className="grid gap-4 sm:grid-cols-3">
-        <div><label className="label" htmlFor="theme">Style</label><select id="theme" name="theme" defaultValue={theme} className="input">{Object.entries(THEMES).map(([k, t]) => <option key={k} value={k}>{t.label}</option>)}</select></div>
-        <div><label className="label" htmlFor="layout">Layout</label><select id="layout" name="layout" defaultValue={layout} className="input">{Object.entries(LAYOUTS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+        <div><label className="label" htmlFor="theme">Design direction</label>
+          <select id="theme" name="theme" defaultValue={isDirection(theme) ? theme : resolveDirection(theme).key} className="input">
+            {DIRECTION_KEYS.map((k) => <option key={k} value={k}>{DIRECTIONS[k].label}</option>)}
+          </select>
+        </div>
+        <div><label className="label" htmlFor="layout">Hero (Corporate only)</label><select id="layout" name="layout" defaultValue={layout} className="input">{Object.entries(LAYOUTS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
         <div><label className="label" htmlFor="domain_id">Proposed domain</label>
           <select id="domain_id" name="domain_id" defaultValue={domainId ?? ""} className="input">
             <option value="">None yet</option>

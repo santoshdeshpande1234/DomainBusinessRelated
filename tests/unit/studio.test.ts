@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { computeModel, confidenceOf, STARTER, type Input } from "@/lib/studio/financial";
 import { analyse, featureMatrix, type Side } from "@/lib/studio/competitors";
 import { buildSite, gaps, jsonLd, pickDesign } from "@/lib/studio/site";
+import { defaultDirection } from "@/lib/studio/design";
 import { parseAudit, type Audit } from "@/lib/discovery/prospects";
 
 const inp = (o: Record<string, number>, basis: Input["basis"] = "actual") => Object.fromEntries(Object.entries(o).map(([k, value]) => [k, { value, basis }]));
@@ -125,7 +126,7 @@ describe("website preview content", () => {
   });
   it("picks a stable design per business", () => {
     expect(pickDesign(facts)).toEqual(pickDesign(facts));
-    expect(["harbor", "sage"]).toContain(pickDesign(facts).theme);
+    expect(pickDesign(facts).theme).toBe(defaultDirection(facts.industry));
   });
   it("does not flag opening hours as prices", () => {
     const a = parseAudit({ url: "https://x.in", finalUrl: "https://x.in/", status: 200, ms: 500, bytes: 100, html: "<p>Open hours 9 to 5</p>" }, 2026);

@@ -13,7 +13,12 @@ export type Section =
   | { type: "prices"; heading?: string; items: string[]; source: string }
   | { type: "links"; heading?: string; items: { title: string; summary: string; url: string }[] }
   | { type: "services" } | { type: "finder" } | { type: "qualify" } | { type: "booking" } | { type: "contact" } | { type: "workflow" }
-  | { type: "cta"; heading: string; text: string };
+  /** Where the call to action leads (a page of this site) and an optional second, lighter action. Older previews lack targets. */
+  | { type: "cta"; heading: string; text: string; target?: string; topic?: string; secondary?: { label: string; target: string } | null }
+  /** Their articles, recreated as pages of the new site. */
+  | { type: "articles"; heading?: string; items: { title: string; summary: string; slug: string }[] }
+  /** Quotes and credentials exactly as the business published them, each with the page it came from. */
+  | { type: "proof"; heading?: string; kind: "quotes" | "credentials"; attributed: { text: string; source: string }[] };
 
 export type SitePage = {
   slug: string; title: string; nav: string | null; heading: string; intro: string | null;
@@ -35,6 +40,16 @@ export type Blueprint = {
 type Facts = { name: string; industry: string; primaryCta: string; booking: boolean; hasPhone: boolean };
 
 const SERVICE_KINDS: PageKind[] = ["service", "product", "solutions"];
+const CREDENTIAL = /\b(award|certified|certification|accredited|accreditation|iso \d{3,5}|member of|registered|licensed|partner)\b/i;
+const UNPROVEN = /award[- ]winning|leading|trusted by|#1|number one|best in|guarantee|\d+\+|\d{2,} (happy |satisfied )?(clients|customers|patients)/i;
+const dedupe = <T extends { text: string }>(xs: T[]) => xs.filter((x, i) => xs.findIndex((y) => y.text === x.text) === i);
+
+/** The page a call to action should open: booking when they take bookings, a quote request, else contact. */
+export function mainTarget(slugs: string[], booking: boolean): string {
+  if (booking && slugs.includes("book")) return "book";
+  if (slugs.includes("quote")) return "quote";
+  return "contact";
+}
 const slugify = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "page";
 const tidyTitle = (p: PageRecord, brand: string) => {
   const raw = p.h1 || p.title || new URL(p.url).pathname.split("/").filter(Boolean).pop()?.replace(/[-_]/g, " ") || "Page";
@@ -85,7 +100,8 @@ export function buildBlueprint(inv: Inventory | null, plan: GrowthPlan, f: Facts
     pg.sections.push(...text(p));
     if (p.prices.length) pg.sections.push({ type: "prices", heading: "Prices published on their site", items: p.prices, source: p.url });
     if (p.faqs.length) pg.sections.push({ type: "faq", heading: `Questions about ${s.title}`, items: p.faqs });
-    pg.sections.push({ type: "cta", heading: `${f.primaryCta}: ${s.title}`, text: `Tell ${f.name} what you need and the team will confirm the next step.` }, { type: "qualify" });
+    pg.sections.push({ type: "cta", heading: `Discuss ${s.title.toLowerCase()} with ${f.name}`, text: "Tell the team about your situation and they will confirm the right next step.", topic: s.title,
+      secondary: { label: "See all services", target: "services" } });
     map(p, "improved", s.slug, "Kept its content; added a clear call to action, a qualifying enquiry form and search-ready structure.");
   }
   if (services.length || ok.some((p) => p.kind === "services" || p.kind === "products")) {
@@ -136,17 +152,46 @@ export function buildBlueprint(inv: Inventory | null, plan: GrowthPlan, f: Facts
         page("book", { title: f.booking ? "Book" : "Request", nav: f.booking ? "Book" : null, heading: f.primaryCta, intro: null, isNew: false }).sources.push(p.url);
         map(p, "replaced", "book", "Replaced by the new booking request flow; same purpose.");
         break;
-      case "blog": case "article": case "resources": case "case_study": case "testimonials": {
-        const pg = page("resources", { title: "Resources", nav: "Resources", heading: "Resources", intro: null, isNew: false });
-        pg.sources.push(p.url);
-        const links = pg.sections.find((s) => s.type === "links") as Extract<Section, { type: "links" }> | undefined;
-        const item = { title: tidyTitle(p, f.name), summary: p.kind === "testimonials" || p.kind === "case_study" ? "Published on their current website." : summary(p), url: p.url };
-        if (links) links.items.push(item); else pg.sections.push({ type: "links", items: [item] });
-        const proof = p.kind === "testimonials" || p.kind === "case_study";
-        map(p, "merged", "resources", proof ? "Linked, not copied: testimonials and results need the business to confirm them first." : "Listed in Resources with a summary and a link to the full article.");
+      case "resources": case "blog": {
+        // A hub page: its own text introduces the Resources page; its articles arrive as their own records.
+        const pg = page("resources", { title: "Resources", nav: "Resources", heading: tidyTitle(p, f.name), intro: p.description, isNew: false });
+        pg.sources.push(p.url); if (p.paragraphs.length) pg.sections.unshift({ type: "text", paragraphs: p.paragraphs.slice(0, 3) });
+        map(p, "improved", "resources", "Kept as the Resources hub; every article it lists that was read is recreated as a page here.");
         break;
       }
-      case "careers": map(p, "excluded", null, "Hiring content isn't part of the customer journey; it stays on their current site."); break;
+      case "article": case "case_study": {
+        const story = p.kind === "case_study";
+        const t = tidyTitle(p, f.name);
+        const slug = `${story ? "story" : "article"}-${slugify(t)}`;
+        const hub = story
+          ? page("stories", { title: "Success stories", nav: "Success stories", heading: "Success stories", intro: `Work ${f.name} has published, as they described it.`, isNew: false })
+          : page("resources", { title: "Resources", nav: "Resources", heading: "Resources", intro: null, isNew: false });
+        const pg = page(slug, { title: t, nav: null, heading: t, intro: p.description, isNew: false });
+        pg.sources.push(p.url); pg.sections.push(...text(p));
+        pg.sections.push({ type: "cta", heading: story ? `Explore a similar solution with ${f.name}` : `Questions about ${t.toLowerCase()}?`, text: `Tell ${f.name} about your situation and the team will suggest the right next step.` });
+        const list = hub.sections.find((x) => x.type === "articles") as Extract<Section, { type: "articles" }> | undefined;
+        const item = { title: t, summary: summary(p), slug };
+        if (list) list.items.push(item); else hub.sections.push({ type: "articles", items: [item] });
+        hub.sources.push(p.url);
+        map(p, "improved", slug, story ? "Recreated as a success story in their own words; outcomes are only what they published." : "Recreated as an article page with its source credited, so visitors stay on the new site.");
+        if (story) review.push(`Success story copied from ${p.url}; confirm the client is happy to be named before publishing.`);
+        break;
+      }
+      case "testimonials": {
+        const qs = p.quotes ?? [];
+        if (!qs.length) { map(p, "excluded", null, "No quotes could be read from this page; add them by hand if wanted."); review.push(`Testimonials page ${p.url} had no readable quotes.`); break; }
+        const pg = page("testimonials", { title: "What clients say", nav: "Testimonials", heading: "What clients say", intro: `Quoted from ${f.name}'s own website.`, isNew: false });
+        pg.sources.push(p.url);
+        map(p, "improved", "testimonials", `${qs.length} quote(s) kept word for word with their source; nothing added.`);
+        break;
+      }
+      case "careers": {
+        const pg = page("careers", { title: "Careers", nav: null, heading: tidyTitle(p, f.name), intro: p.description, isNew: false });
+        pg.sources.push(p.url); pg.sections.push(...text(p));
+        pg.sections.push({ type: "cta", heading: "Interested in working here?", text: `Send ${f.name} a note about the role you're interested in.`, target: "contact" });
+        map(p, "preserved", "careers", "Kept as a careers page in the footer; applications go through the contact form.");
+        break;
+      }
       case "legal": map(p, "excluded", null, "Legal pages must come from the business itself."); break;
       case "account": map(p, "excluded", null, "Customer logins stay on their existing system."); break;
       default: {
@@ -158,7 +203,20 @@ export function buildBlueprint(inv: Inventory | null, plan: GrowthPlan, f: Facts
       }
     }
   }
-  for (const p of ok) for (const c of p.claims) if (review.length < 40) review.push(`Trust claim on ${p.url} left out until confirmed: “${c.slice(0, 120)}”`);
+  // Social proof, exactly as published and credited. Statistics and superlatives stay out until confirmed.
+  const quotes = dedupe(ok.flatMap((p) => (p.quotes ?? []).map((q) => ({ text: q, source: p.url })))).slice(0, 9);
+  const credentials = dedupe(ok.flatMap((p) => p.claims.filter((c) => CREDENTIAL.test(c) && !UNPROVEN.test(c) && !(p.quotes ?? []).includes(c)).map((c) => ({ text: c, source: p.url })))).slice(0, 6);
+  if (quotes.length) {
+    const t = pages.get("testimonials");
+    if (t) t.sections.push({ type: "proof", kind: "quotes", attributed: quotes });
+    review.push(`${quotes.length} customer quote(s) are shown word for word from their site; confirm they may be reused.`);
+  }
+  if (credentials.length) {
+    page("about", { title: "About", nav: "About", heading: `About ${f.name}`, intro: null, isNew: true }).sections.push({ type: "proof", kind: "credentials", heading: "What they publish about their credentials", attributed: credentials });
+    review.push(`${credentials.length} credential statement(s) are shown as published; check them before launch.`);
+  }
+  const shown = new Set([...quotes, ...credentials].map((x) => x.text));
+  for (const p of ok) for (const c of p.claims) if (!shown.has(c) && review.length < 40) review.push(`Trust claim on ${p.url} left out until confirmed: “${c.slice(0, 120)}”`);
 
   // ---------------------------------------------------------------- Growth Plan features
   const features: FeatureRow[] = [];
@@ -222,15 +280,25 @@ export function buildBlueprint(inv: Inventory | null, plan: GrowthPlan, f: Facts
     }
   }
   contact();
+  // A business that takes bookings gets the booking flow even when booking wasn't a gap (they already offer it).
+  if (f.booking) ensure("book", { title: "Book", nav: "Book", heading: f.primaryCta, intro: null, isNew: !has("book") }, [{ type: "booking" }, { type: "qualify" }]);
   if (!has("faq")) ensure("faq", { title: "FAQ", nav: "FAQ", heading: "Questions", intro: null, isNew: true }, []);
 
-  // Home: their content, then the services and the main conversion path.
+  // Home: their content, then the services, proof and the main conversion path.
   if (homeRec) home.sections.push(...text(homeRec));
   home.sections.push({ type: "services" });
   if (has("services")) home.sections.push({ type: "finder" });
-  home.sections.push({ type: "cta", heading: f.primaryCta, text: `${f.name} replies to confirm the details.` });
+  if (quotes.length) home.sections.push({ type: "proof", kind: "quotes", heading: "In their clients' words", attributed: quotes.slice(0, 3) });
+  const top = services.slice(0, 3).map((x) => x.title);
+  home.sections.push({ type: "cta", heading: `${f.primaryCta} with ${f.name}`,
+    text: `Tell the team what you need${top.length ? `, whether it's ${top.join(", ")} or something else,` : ""} and get a clear next step.`,
+    secondary: has("services") ? { label: "Explore services", target: "services" } : null });
 
-  const order = ["home", "services", "about", "pricing", "book", "quote", "faq", "resources", "contact"];
+  // Every call to action without a destination leads to the main conversion page.
+  const main = mainTarget([...pages.keys()], f.booking);
+  for (const pg of pages.values()) for (const sec of pg.sections) if (sec.type === "cta" && !sec.target) sec.target = main;
+
+  const order = ["home", "services", "about", "stories", "testimonials", "pricing", "book", "quote", "faq", "resources", "contact", "careers"];
   const sorted = [...pages.values()].sort((a, b) => (order.indexOf(a.slug) + 1 || 50) - (order.indexOf(b.slug) + 1 || 50));
   const missing = inv ? [] : ["The website hasn't been read page by page yet (run generation with research)."];
   return { built_at: now.toISOString(), pages: sorted.filter((p) => p.sections.length || p.slug === "faq" || p.slug === "home"), originals, features, services, review: [...new Set(review)], missing };

@@ -5,6 +5,7 @@ import { buildPlan, clientGrowth, type EngineKey, type GrowthPlan } from "./grow
 import { buildSite, focusEngine, pickDesign, validateSite, withGrowth, type Sections, type SiteContent, type SiteFacts } from "./site";
 import { buildBlueprint, type Blueprint } from "./blueprint";
 import type { Inventory } from "./inventory";
+import { qualityGate } from "./quality";
 
 export type StageKey = "context" | "research" | "inventory" | "position" | "gaps" | "engines" | "blueprint" | "content" | "validate" | "save";
 export type StageStatus = "done" | "partial" | "skipped" | "failed";
@@ -65,7 +66,9 @@ export function compose(x: ComposeInput): Composed {
   g = focusEngine(g, g.focus);
   const grown = withGrowth(base, g, { keepHero: !!keep, sections: x.sections });
   const bp = buildBlueprint(x.inventory ?? null, plan, { name: f.name, industry: f.industry, primaryCta: grown.hero.primary_cta, booking: grown.booking, hasPhone: !!f.phone }, x.others, x.now);
-  const content = applyBlueprint(grown, bp, x.inventory ?? null, !!keep);
+  const applied = applyBlueprint(grown, bp, x.inventory ?? null, !!keep);
+  const content: SiteContent = { ...applied, industry: f.industry,
+    proof: { rating: x.rating != null ? { value: x.rating, count: x.reviews, source: "Google Maps listing" } : null } };
   const count = (k: string) => bp.originals.filter((o) => o.action === k).length;
   const fcount = (k: string) => bp.features.filter((o) => o.status === k).length;
   stages.push({ key: "blueprint", status: !f.website ? "done" : bp.originals.length ? (bp.review.length ? "partial" : "done") : "partial",
@@ -79,7 +82,10 @@ export function compose(x: ComposeInput): Composed {
     return { ok: false, stages, error: `Preview failed validation: ${fatal.join("; ") || "no Growth Engines"}.` };
   }
   const warnings = problems.filter((p) => p.startsWith("Unsupported trust claim")).map((p) => `${p} (check where it came from before sharing)`);
-  stages.push({ key: "validate", status: warnings.length ? "partial" : "done", note: warnings.length ? warnings.join("; ") : "Content complete, no unsupported claims, no other business mentioned." });
+  const q = qualityGate(content, { blueprint: bp, others: x.others.filter((n) => n.trim().toLowerCase() !== f.name.trim().toLowerCase()) });
+  const failed = q.checks.filter((c) => c.status === "fail").map((c) => c.label);
+  stages.push({ key: "validate", status: warnings.length || failed.length ? "partial" : "done",
+    note: `Quality gate ${q.summary}${failed.length ? ` Failed: ${failed.join("; ")}.` : ""}${warnings.length ? ` ${warnings.join("; ")}` : ""}`.slice(0, 300) });
   return { ok: true, content, plan, blueprint: bp, design: pickDesign(f), stages, warnings };
 }
 
@@ -90,9 +96,14 @@ function applyBlueprint(c: SiteContent, bp: Blueprint, inv: Inventory | null, ke
     ? fromPages.map((s) => ({ title: s.title, text: s.text, source: "website" as const, slug: s.slug }))
     : c.services.map((s) => ({ ...s, slug: fromPages.find((x) => x.title.toLowerCase() === s.title.toLowerCase())?.slug ?? s.slug ?? null }));
   const about = inv?.pages.find((p) => p.kind === "about" && p.paragraphs.length)?.paragraphs[0];
-  const brand = inv ? { ...c.brand, logo: inv.brand.logo, colors: inv.brand.accent ? { accent: inv.brand.accent, ink: inv.brand.ink } : null } : c.brand;
+  const brand = inv ? { ...c.brand, logo: inv.brand.logo, colors: inv.brand.accent ? { accent: inv.brand.accent, ink: inv.brand.ink } : null, social: inv.brand.social ?? [], image: inv.brand.image ?? null } : c.brand;
+  // Their own home-page headline and description lead, when they read as a headline.
+  const homeRec = inv?.pages.find((p) => p.kind === "home" && p.status === "extracted");
+  const h1 = homeRec?.h1?.trim();
+  const hero = !keepText && h1 && h1.length >= 12 && h1.length <= 90 && h1.toLowerCase() !== c.brand.name.toLowerCase() && !/\[\[/.test(h1)
+    ? { ...c.hero, headline: h1, sub: homeRec?.description && homeRec.description.length <= 240 ? homeRec.description : c.hero.sub } : c.hero;
   return {
-    ...c, brand, services, pages: bp.pages,
+    ...c, brand, hero, services, pages: bp.pages,
     about: !keepText && about && /\[\[/.test(c.about) ? about : c.about,
     sources: inv ? [...c.sources.filter((x) => x.label !== "Pages read from their website"), { label: "Pages read from their website", url: inv.root }] : c.sources,
   };
@@ -124,7 +135,7 @@ export function refine(c: SiteContent, what: Refinement, opts: { name: string; h
   const sections = { ...(c.sections ?? { assistant: true, finder: true, qualify: true, faq: true, differentiation: false }) };
   switch (what) {
     case "premium":
-      return { content: c, theme: "atelier", layout: "centered", ok: "Switched to the premium Atelier style with a centred hero." };
+      return { content: c, theme: "corporate", layout: "split", ok: "Switched to the Premium Corporate direction: split hero with a proof panel and restrained colour." };
     case "hero":
       return { content: { ...c, hero: { ...c.hero, headline: opts.heroTemplate.replace("{name}", opts.name).slice(0, 120), sub: `${g.segment ? `For ${g.segment}: ` : ""}${g.promise}` } }, ok: "Hero rewritten around the main action, using only the facts held." };
     case "lead_gen":

@@ -54,7 +54,7 @@ export function Assistant({ name, greeting, answers, fallback }: { name: string;
 }
 
 /** Recommends a service from the visitor's choice. Works in the browser; nothing is sent. */
-export function ServiceFinder({ question, options }: { question: string; options: { need: string; service: string; cta: string }[] }) {
+export function ServiceFinder({ question, options }: { question: string; options: { need: string; service: string; cta: string; href?: string }[] }) {
   const [pick, setPick] = useState<number | null>(null);
   const o = pick == null ? null : options[pick];
   return (
@@ -67,7 +67,7 @@ export function ServiceFinder({ question, options }: { question: string; options
         ))}
       </div>
       <div aria-live="polite" className="mt-4 min-h-12 text-sm">
-        {o ? <p><span className="font-medium">Recommended:</span> {o.service}. <a href="#contact" className="font-medium text-[color:var(--accent)] underline">{o.cta} →</a></p>
+        {o ? <p><span className="font-medium">Recommended:</span> {o.service}. <a href={o.href ?? "#contact"} className="font-medium text-[color:var(--accent)] underline">{o.href && o.service === o.need ? `See ${o.service}` : o.cta} →</a></p>
           : <p className="text-neutral-500">Choose an option to see the recommended next step.</p>}
       </div>
     </div>
