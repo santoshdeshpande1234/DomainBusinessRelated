@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, discoverLinks, extractBrand, extractPage, missingInfo, parseSitemap, pickPages, robotsDisallow, sameSite, type Inventory, type PageRecord } from "@/lib/studio/inventory";
+import { classify, discoverLinks, extractBrand, extractPage, missingInfo, parseSitemap, pickPages, readProblem, robotsRules, allowed, sameSite, type Inventory, type PageRecord } from "@/lib/studio/inventory";
 import { buildBlueprint } from "@/lib/studio/blueprint";
 import { buildPlan } from "@/lib/studio/growth";
 import { compose } from "@/lib/studio/compose";
@@ -45,10 +45,43 @@ describe("reading their website", () => {
     expect(parseSitemap("<urlset><url><loc>https://smile.example/blog/tips</loc></url><url><loc>https://smile.example/faq</loc></url></urlset>", B).urls)
       .toEqual(["https://smile.example/blog/tips", "https://smile.example/faq"]);
     expect(parseSitemap("<sitemapindex><sitemap><loc>https://smile.example/page-sitemap.xml</loc></sitemap></sitemapindex>", B).nested).toEqual(["https://smile.example/page-sitemap.xml"]);
-    const dis = robotsDisallow("User-agent: Googlebot\nDisallow: /g\n\nUser-agent: *\nDisallow: /private\nSitemap: https://smile.example/sitemap.xml");
-    expect(dis).toEqual(["/private"]);
+    const dis = robotsRules("User-agent: Googlebot\nDisallow: /g\n\nUser-agent: *\nDisallow: /private\nSitemap: https://smile.example/sitemap.xml");
+    expect(dis).toEqual([{ allow: false, path: "/private" }]);
     const picked = pickPages("https://smile.example/", discoverLinks(HOME, B), ["https://smile.example/faq", "https://smile.example/private/x", "https://smile.example/privacy-policy", "https://smile.example/blog/tips"], dis, 6);
     expect(picked).toEqual(["https://smile.example/about-us", "https://smile.example/services", "https://smile.example/services/dental-implants", "https://smile.example/services/braces", "https://smile.example/contact"]);
+  });
+
+  it("reads robots.txt wildcards and Allow rules as crawlers do", () => {
+    // A HubSpot-style file: preview URLs are blocked, the rest of the site is not.
+    const r = robotsRules("User-agent: GPTBot\nUser-agent: ClaudeBot\nDisallow: /\n\nUser-agent: *\nAllow: /\nDisallow: /tag/\nDisallow: /*?hs_preview\nDisallow: /*hsCacheBuster\nDisallow: /*.pdf$");
+    expect(r.some((x) => x.path === "/" && !x.allow)).toBe(false);
+    expect(allowed("https://x.example/about", r)).toBe(true);
+    expect(allowed("https://x.example/services/it-staffing", r)).toBe(true);
+    expect(allowed("https://x.example/tag/news", r)).toBe(false);
+    expect(allowed("https://x.example/about?hs_preview=1", r)).toBe(false);
+    expect(allowed("https://x.example/a?x=1&hsCacheBuster=2", r)).toBe(false);
+    expect(allowed("https://x.example/brochure.pdf", r)).toBe(false);
+    expect(allowed("https://x.example/pdf-guide", r)).toBe(true);
+    // Longest match wins; Allow wins a tie.
+    const r2 = robotsRules("User-agent: *\nDisallow: /private\nAllow: /private/open");
+    expect(allowed("https://x.example/private/open/page", r2)).toBe(true);
+    expect(allowed("https://x.example/private/x", r2)).toBe(false);
+    // Agents listed together share the group; a later group starts fresh.
+    expect(robotsRules("User-agent: Googlebot\nUser-agent: *\nDisallow: /x\nUser-agent: Bingbot\nDisallow: /y")).toEqual([{ allow: false, path: "/x" }]);
+  });
+
+  it("reads the real home page first when the listed address is deep inside the site", () => {
+    const links = [{ url: "https://x.example/services", nav: true }, { url: "https://x.example/about", nav: true }];
+    expect(pickPages("https://x.example/about/locations/new-york", links, [], [], 6)).toEqual(["https://x.example/", "https://x.example/services", "https://x.example/about"]);
+    expect(classify("https://x.example/about/locations/new-york", null)).not.toBe("home");
+  });
+
+  it("flags a read that couldn't follow the site's links, not information the site doesn't publish", () => {
+    const base = inventory();
+    expect(readProblem(base)).toBeNull();
+    expect(readProblem({ ...base, pages: base.pages.slice(0, 1), discovered: 81 })).toMatch(/Only the first page could be read of 81/);
+    expect(readProblem({ ...base, pages: base.pages.map((p, i) => i > 3 ? { ...p, status: "failed" as const } : p) })).toMatch(/5 of 9 pages could not be loaded/);
+    expect(readProblem({ ...base, queue: ["https://smile.example/x"], pages: base.pages.slice(0, 1) })).toBeNull();
   });
 
   it("classifies pages by their address", () => {
