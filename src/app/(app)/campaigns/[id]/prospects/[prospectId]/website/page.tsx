@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge, Card, Empty, Notice, PageHeader, type Tone } from "@/components/ui";
 import { RunButton } from "@/components/run-button";
+import { CompetitivePosition } from "@/components/competitive-position";
 import { getSession } from "@/lib/session";
 import { can } from "@/lib/permissions";
 import { userClient } from "@/lib/supabase/server";
@@ -76,6 +77,8 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
               <PreviewWorkspace token={w.token} name={p.name} currentSite={p.website} hasPlan={!!content.growth} versions={versions!.map((v) => ({ version: v.version, reason: v.reason, at: v.created_at }))} pages={(content.pages ?? []).map((x) => ({ slug: x.slug, title: x.title }))} />
             </Card>
 
+            {plan?.advantage ? <CompetitivePosition a={plan.advantage} /> : plan && <Card title="Competitive position"><p className="text-sm text-muted">This plan predates competitive positions. Use “Refresh growth plan” to assess where {p.name} is ahead or behind nearby businesses.</p></Card>}
+
             <Card title="Original website inventory" description={inv ? `${inv.root.replace(/^https?:\/\//, "")}: ${inv.pages.length} page(s) read ${when(invRow!.crawled_at)}${inv.sitemap ? ", using its sitemap" : ""}${inv.robots ? "; robots.txt respected" : ""}. Internal.` : undefined}>
               {!inv ? <p className="text-sm text-muted">{p.website ? "Their website hasn't been read page by page yet. Regenerate with fresh research to read it." : "No website is listed, so the proposed site starts from the listing and the Growth Plan."}</p> : (
                 <div className="space-y-3">
@@ -130,6 +133,7 @@ export default async function WebsitePage({ params }: { params: Promise<{ id: st
                           <Badge tone={PRIORITY[g.priority]}>{g.priority}</Badge><span className="font-medium">{g.gap}</span>
                           <span className="text-muted">→ {g.layer === "foundation" ? "Website foundation" : plan.engines.find((e) => e.key === g.layer)?.name}</span>
                           <Badge tone={BASIS[g.basis][1]}>{BASIS[g.basis][0]}</Badge>
+                          {g.edge && <Badge tone="accent">{g.edge}</Badge>}
                         </summary>
                         <dl className="mt-2 grid gap-x-6 gap-y-1.5 pl-1 text-xs sm:grid-cols-2">
                           <div className="sm:col-span-2"><dt className="inline text-faint">Evidence: </dt><dd className="inline">{g.evidence}</dd></div>

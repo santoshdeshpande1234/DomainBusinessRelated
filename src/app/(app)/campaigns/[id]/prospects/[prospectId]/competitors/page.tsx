@@ -11,6 +11,9 @@ import { when } from "@/lib/format";
 import type { Audit } from "@/lib/discovery/prospects";
 import { analyse, featureMatrix, type Insight, type Side } from "@/lib/studio/competitors";
 import { PLACES_COST_PER_REQUEST_USD } from "@/lib/discovery/places";
+import { assessAdvantage } from "@/lib/studio/advantage";
+import type { Inventory } from "@/lib/studio/inventory";
+import { CompetitivePosition } from "@/components/competitive-position";
 import { auditCompetitors, competitorsFromCampaign, competitorsFromPlaces, recheckCompetitors, removeCompetitor } from "./actions";
 import { AddCompetitorForm } from "./form";
 
@@ -40,11 +43,12 @@ export default async function CompetitorsPage({ params }: { params: Promise<{ id
   const { id, prospectId } = await params;
   const s = await getSession();
   const db = await userClient();
-  const [{ data: p }, { data: c }, { data: list = [] }, { data: vis }] = await Promise.all([
+  const [{ data: p }, { data: c }, { data: list = [] }, { data: vis }, { data: invRow }] = await Promise.all([
     db.from("prospects").select("*").eq("id", prospectId).eq("campaign_id", id).maybeSingle(),
-    db.from("campaigns").select("name").eq("id", id).maybeSingle(),
+    db.from("campaigns").select("name, industry").eq("id", id).maybeSingle(),
     db.from("competitors").select("*").eq("prospect_id", prospectId).order("created_at"),
     db.from("evidence").select("value, observed_at, source_url").eq("prospect_id", prospectId).eq("kind", "visibility").order("observed_at", { ascending: false }).limit(1).maybeSingle(),
+    db.from("site_inventories").select("inventory").eq("prospect_id", prospectId).maybeSingle(),
   ]);
   if (!p || !c) notFound();
   const write = can(s.role, "campaign:write");
@@ -52,6 +56,9 @@ export default async function CompetitorsPage({ params }: { params: Promise<{ id
   const sides: Side[] = list!.map((x) => ({ name: x.name, audit: x.audit as Audit | null, reviews: x.reviews, rating: x.rating == null ? null : Number(x.rating), hasWebsite: !!x.website }));
   const matrix = featureMatrix(me, sides);
   const a = analyse(me, sides);
+  const inv = (invRow?.inventory as Inventory | undefined)?.pages ? (invRow!.inventory as Inventory) : null;
+  const position = assessAdvantage({ name: p.name, industry: c.industry, prospect: me, competitors: sides,
+    site: inv ? { servicePages: inv.pages.filter((x) => x.status === "extracted" && (x.kind === "service" || x.kind === "product")).length, prices: inv.pages.some((x) => x.prices.length > 0) } : null });
   const unchecked = list!.filter((x) => x.website && !x.audited_at).length + (p.website && !p.audited_at ? 1 : 0);
   const base = `/campaigns/${id}/prospects/${prospectId}`;
 
@@ -71,6 +78,7 @@ export default async function CompetitorsPage({ params }: { params: Promise<{ id
         <Card><Empty title="No competitors yet">{write ? "Start with businesses this campaign already found (free), search Google Maps, or add one you know." : "A member hasn't added competitors yet."}</Empty></Card>
       ) : (
         <div className="space-y-6">
+          <CompetitivePosition a={position} />
           <Card title="Website features" description={`${a.compared} of ${list!.length} competitor websites checked. A dash means not checked or not loadable.`}
             actions={write && <form action={recheckCompetitors.bind(null, id, prospectId)}><Submit className="btn-ghost py-1 text-xs" pending="…">Mark all for re-check</Submit></form>}>
             <div className="-mx-5 overflow-x-auto px-5">

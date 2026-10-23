@@ -6,13 +6,14 @@ import { buildSite, focusEngine, pickDesign, validateSite, withGrowth, type Sect
 import { buildBlueprint, type Blueprint } from "./blueprint";
 import type { Inventory } from "./inventory";
 
-export type StageKey = "context" | "research" | "inventory" | "gaps" | "engines" | "blueprint" | "content" | "validate" | "save";
+export type StageKey = "context" | "research" | "inventory" | "position" | "gaps" | "engines" | "blueprint" | "content" | "validate" | "save";
 export type StageStatus = "done" | "partial" | "skipped" | "failed";
 export type Stage = { key: StageKey; status: StageStatus; note: string };
 export const STAGES: { key: StageKey; label: string }[] = [
   { key: "context", label: "Prospect context" },
   { key: "research", label: "Website research" },
   { key: "inventory", label: "Website page inventory" },
+  { key: "position", label: "Competitive position" },
   { key: "gaps", label: "Gap analysis" },
   { key: "engines", label: "Growth Engine selection" },
   { key: "blueprint", label: "Content and feature blueprint" },
@@ -22,7 +23,7 @@ export const STAGES: { key: StageKey; label: string }[] = [
 ];
 
 export type ComposeInput = {
-  facts: SiteFacts; reviews: number | null; competitors: Side[];
+  facts: SiteFacts; reviews: number | null; competitors: Side[]; rating?: number | null;
   /** Names of the other businesses in the campaign; the preview must not mention any of them. */
   others: string[];
   /** "site" rebuilds everything; "plan" keeps the existing text and refreshes only the growth layer. */
@@ -42,11 +43,17 @@ export function compose(x: ComposeInput): Composed {
   const services = (f.audit && !f.audit.error ? f.audit.nav ?? [] : []).slice(0, 6);
   const growthFacts = {
     name: f.name, industry: f.industry, industryLabel: f.industryLabel, category: f.category, city: f.city, website: f.website, audit: f.audit,
-    phone: f.phone, email: f.email, address: f.address, reviews: x.reviews, services, competitors: x.competitors,
+    phone: f.phone, email: f.email, address: f.address, reviews: x.reviews, services, competitors: x.competitors, rating: x.rating ?? null,
+    site: x.inventory ? { servicePages: x.inventory.pages.filter((p) => p.status === "extracted" && (p.kind === "service" || p.kind === "product")).length, prices: x.inventory.pages.some((p) => p.prices.length > 0) } : null,
   };
   const reuse = x.mode === "site" && !!x.savedPlan?.gaps?.length && !x.focus;
-  const plan = reuse ? x.savedPlan! : buildPlan(growthFacts, { focus: x.focus, now: x.now });
+  let plan = reuse ? x.savedPlan! : buildPlan(growthFacts, { focus: x.focus, now: x.now });
+  // A plan saved before competitive positions existed keeps its gaps; only the position is added.
+  if (!plan.advantage) plan = { ...plan, advantage: buildPlan(growthFacts, { now: x.now }).advantage };
   const stages: Stage[] = [];
+  const adv = plan.advantage!;
+  stages.push({ key: "position", status: adv.evidence.strength === "weak" ? "partial" : "done",
+    note: `${adv.headline} Evidence ${adv.evidence.strength} (${adv.evidence.score}/100). ${adv.evidence.note}`.slice(0, 300) });
   const observed = plan.gaps.filter((g) => g.basis !== "industry").length;
   stages.push({ key: "gaps", status: observed ? "done" : "partial",
     note: `${reuse ? `Saved Growth Plan from ${plan.built_at.slice(0, 10)} used as the source of truth. ` : ""}${plan.gaps.length} gap(s): ${observed} observed, ${plan.gaps.length - observed} industry recommendation(s)${observed ? "" : "; nothing could be observed, so the plan rests on assumptions"}.` });

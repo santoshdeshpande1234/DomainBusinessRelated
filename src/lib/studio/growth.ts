@@ -6,6 +6,7 @@
 // reaches a client-facing preview: no competitor names, scores, prices or internal notes.
 import type { Audit } from "@/lib/discovery/prospects";
 import { featureMatrix, type Side } from "./competitors";
+import { assessAdvantage, differentiators, DIMENSIONS, type Advantage, type Outlook, type Position } from "./advantage";
 
 export type EngineKey = "lead_gen" | "sales" | "experience" | "retention" | "operations" | "search" | "insight";
 export type Layer = EngineKey | "foundation";
@@ -122,6 +123,8 @@ export type GrowthFacts = {
   name: string; industry: string; industryLabel: string; category: string | null; city: string | null;
   website: string | null; audit: Audit | null; phone: string | null; email: string | null; address: string | null;
   reviews: number | null; services: string[]; competitors: Side[];
+  /** Their Google rating and what reading their site page by page found, when known. */
+  rating?: number | null; site?: { servicePages: number; prices: boolean } | null;
 };
 
 export type Gap = {
@@ -130,6 +133,8 @@ export type Gap = {
   evidence: string; client_evidence: string; // evidence is internal; client_evidence never names competitors
   impact: Level; feasibility: Level; confidence: Level; dependencies: string[]; demo: DemoKey | null;
   score: number; priority: "high" | "medium" | "low";
+  /** Set when closing this gap wins back (or claims) competitive ground; ranked ahead of plain defects. */
+  edge?: string;
 };
 export type Engine = { key: EngineKey; name: string; outcome: string; capabilities: string[]; gaps: string[]; kpis: string[]; score: number; primary: boolean };
 export type Phase = { title: string; items: string[] };
@@ -140,6 +145,8 @@ export type GrowthPlan = {
   gaps: Gap[]; engines: Engine[]; foundation: string[]; differentiation: string[]; strengths: string[];
   rollout: Phase[]; kpis: string[]; dependencies: string[]; capabilities: Capability[];
   summary: { problem: string; transformation: string; benefits: string[] };
+  /** Competitive position, capabilities and five-year outlook. Plans saved before it existed don't have it. */
+  advantage?: Advantage;
 };
 
 const DEP = {
@@ -153,7 +160,7 @@ const DEP = {
 };
 
 const usable = (a: Audit | null): a is Audit => !!a && !a.error;
-const sideOf = (f: GrowthFacts): Side => ({ name: f.name, audit: f.audit, reviews: f.reviews, rating: null, hasWebsite: !!f.website });
+const sideOf = (f: GrowthFacts): Side => ({ name: f.name, audit: f.audit, reviews: f.reviews, rating: f.rating ?? null, hasWebsite: !!f.website });
 
 /** Every gap we can support with evidence, plus labelled industry recommendations. */
 export function findGaps(f: GrowthFacts, year = new Date().getUTCFullYear()): Gap[] {
@@ -276,7 +283,17 @@ export function selectEngines(gaps: Gap[], industry: string, focus?: EngineKey |
 
 export function buildPlan(f: GrowthFacts, opts: { focus?: EngineKey | null; now?: Date } = {}): GrowthPlan {
   const now = opts.now ?? new Date();
-  const gaps = findGaps(f, now.getUTCFullYear());
+  const advantage = assessAdvantage({ name: f.name, industry: f.industry, prospect: sideOf(f), competitors: f.competitors, site: f.site });
+  // Differentiation leads: a gap that wins back competitive ground outranks a website defect of the same size.
+  const edge = differentiators(advantage);
+  const dimOf = new Map(advantage.dimensions.flatMap((d) => d.signals.map((s) => [s.key === "services" ? "discovery" : s.key, d] as const)));
+  const gaps = findGaps(f, now.getUTCFullYear()).map((g) => {
+    const bonus = g.key === "no_site" ? 10 : edge.get(g.key) ?? 0;
+    if (!bonus) return g;
+    const score = g.score + bonus;
+    const d = dimOf.get(g.key);
+    return { ...g, score, priority: score >= 11 ? "high" : score >= 8 ? "medium" : "low", edge: d ? `${DIMENSIONS[d.key].name}: ${d.position === "open" ? "open ground" : "behind nearby businesses"}` : undefined } as Gap;
+  }).sort((x, y) => y.score - x.score);
   const engines = selectEngines(gaps, f.industry, opts.focus);
   const a = usable(f.audit) ? f.audit : null;
   const p = profileFor(f.industry);
@@ -330,9 +347,9 @@ export function buildPlan(f: GrowthFacts, opts: { focus?: EngineKey | null; now?
   const firstGaps = gaps.filter((g) => g.basis !== "industry").slice(0, 3).map((g) => g.gap.toLowerCase());
   return {
     version: 1, built_at: now.toISOString(), industry: f.industry, verified, unverified, gaps, engines, foundation: [...new Set(foundation)], differentiation, strengths,
-    rollout, kpis: [...new Set(engines.flatMap((e) => e.kpis))].slice(0, 8), dependencies, capabilities,
+    rollout, kpis: [...new Set(engines.flatMap((e) => e.kpis))].slice(0, 8), dependencies, capabilities, advantage,
     summary: {
-      problem: firstGaps.length ? `${f.name}'s current online presence has ${list(firstGaps)}.` : `${f.name}'s website covers the basics; the opportunity is in automation and repeat business.`,
+      problem: advantage.compared ? `${advantage.headline}${firstGaps.length ? ` On the website itself: ${list(firstGaps)}.` : ""}` : firstGaps.length ? `${f.name}'s current online presence has ${list(firstGaps)}.` : `${f.name}'s website covers the basics; the opportunity is in automation and repeat business.`,
       transformation: `A ${(f.category ?? f.industryLabel).toLowerCase()} website rebuilt as a growth platform, led by ${list(top.length ? top : [name("lead_gen")])}.`,
       benefits: [...new Set(gaps.slice(0, 5).map((g) => g.benefit))],
     },
@@ -348,6 +365,13 @@ export type ClientGrowth = {
   foundation: string[]; differentiation: string[]; strengths: string[]; rollout: Phase[]; kpis: string[]; dependencies: string[];
   capabilities: Capability[]; qualify: Question[]; today: { label: string; today: "yes" | "no" | "unknown"; proposed: string }[];
   segment: string | null; focus: EngineKey | null;
+  /** Competitive position in counts only (never a competitor's name), capabilities and the five-year outlook. */
+  position?: {
+    headline: string | null; note: string;
+    dimensions: { name: string; question: string; position: Position; points: string[] }[];
+    capabilities: { name: string; reason: string; implementations: { text: string; why: string; likelihood: string; kpi: string }[] }[];
+    outlook: Outlook[];
+  };
 };
 
 /** The part of a plan that a client may see. Built from scratch, so internal fields can't slip through. */
@@ -376,6 +400,18 @@ export function clientGrowth(plan: GrowthPlan, f: Pick<GrowthFacts, "name" | "in
       { label: "Conversion tracking", today: yn(a?.analytics), proposed: "Calls, forms and bookings tracked" },
     ],
     segment: opts.segment ?? null, focus: opts.focus ?? null,
+    position: plan.advantage ? clientPosition(plan.advantage) : undefined,
+  };
+}
+
+/** Rebuilt field by field from the internal assessment, so nothing else can slip into the client view. */
+function clientPosition(a: Advantage): NonNullable<ClientGrowth["position"]> {
+  return {
+    headline: a.compared ? a.headline : null,
+    note: a.compared ? `Compared with ${a.compared} nearby business${a.compared === 1 ? "" : "es"} on what we could observe on their websites and public listings. Business names are not shown.` : "No nearby businesses compared yet, so positions are not shown.",
+    dimensions: a.compared ? a.dimensions.filter((d) => d.position !== "unknown").map((d) => ({ name: d.name, question: d.question, position: d.position, points: d.signals.filter((s) => s.position !== "unknown").map((s) => s.evidence) })) : [],
+    capabilities: a.capabilities.map((c) => ({ name: c.name, reason: c.reason, implementations: c.implementations.map((i) => ({ text: i.text, why: i.why, likelihood: i.likelihood, kpi: i.kpi })) })),
+    outlook: a.outlook.map((o) => ({ ...o })),
   };
 }
 

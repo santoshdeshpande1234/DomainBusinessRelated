@@ -101,7 +101,7 @@ describe("preview generation", () => {
   it("builds a complete, validated preview and reports each stage", () => {
     const r = compose(input());
     if (!r.ok) throw new Error(r.error);
-    expect(r.stages.map((s) => s.key)).toEqual(["gaps", "engines", "blueprint", "content", "validate"]);
+    expect(r.stages.map((s) => s.key)).toEqual(["position", "gaps", "engines", "blueprint", "content", "validate"]);
     // Without a page inventory the blueprint is partial; everything else completes.
     expect(r.stages.filter((s) => s.status !== "done").map((s) => s.key)).toEqual(["blueprint"]);
     const c = r.content;

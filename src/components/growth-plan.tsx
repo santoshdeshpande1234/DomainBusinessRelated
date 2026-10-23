@@ -7,6 +7,8 @@ import { DemoBadge, ImpactCalculator, PrintButton, WorkflowDemo } from "@/compon
 
 const BASIS = { observed: "Observed on your site", competitor: "Observed; common nearby", industry: "Industry recommendation" } as const;
 const TODAY = { yes: "In place", no: "Missing", unknown: "Not verified" } as const;
+const POS = { ahead: ["Ahead", "bg-emerald-100 text-emerald-900"], level: ["Level", "bg-neutral-200 text-neutral-700"], behind: ["Behind", "bg-rose-100 text-rose-900"], open: ["Open ground", "bg-sky-100 text-sky-900"], unknown: ["Not compared", "bg-neutral-200 text-neutral-700"] } as const;
+const READY = { ready: "Ready", partly: "Partly ready", "not yet": "Not ready yet", unknown: "Not assessed" } as const;
 
 export function GrowthPlanView({ c, owner, siteHref }: { c: SiteContent; owner: string; siteHref: string }) {
   const g = c.growth!;
@@ -21,6 +23,7 @@ export function GrowthPlanView({ c, owner, siteHref }: { c: SiteContent; owner: 
     "The outcome is tracked against the KPIs below",
   ];
   const statuses = Object.keys(DEMO_STATUS) as DemoStatus[];
+  const pos = g.position;
 
   return (
     <main className="bg-white">
@@ -35,6 +38,41 @@ export function GrowthPlanView({ c, owner, siteHref }: { c: SiteContent; owner: 
           </div>
         </div>
       </section>
+
+      {pos && (pos.dimensions.length > 0 || pos.capabilities.length > 0) && (
+        <section className="mx-auto max-w-6xl px-5 py-14">
+          <p className="text-sm font-semibold uppercase tracking-wider text-[color:var(--accent)]">Competitive position</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{pos.headline ?? `Where ${c.brand.name} can stand out`}</h2>
+          <p className="mt-2 max-w-3xl text-sm text-neutral-600">{pos.note}</p>
+          {pos.dimensions.length > 0 && (
+            <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {pos.dimensions.map((d) => (
+                <li key={d.name} className="rounded-2xl p-5 ring-1 ring-neutral-200">
+                  <div className="flex items-center justify-between gap-2"><h3 className="font-semibold">{d.name}</h3><span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${POS[d.position][1]}`}>{POS[d.position][0]}</span></div>
+                  <p className="mt-1 text-xs text-neutral-500">{d.question}</p>
+                  <ul className="mt-3 space-y-1.5 text-sm text-neutral-700">{d.points.map((x) => <li key={x}>{x}</li>)}</ul>
+                </li>
+              ))}
+            </ul>
+          )}
+          {pos.capabilities.length > 0 && (
+            <div className="mt-10">
+              <h3 className="text-xl font-semibold tracking-tight">Capabilities to build, most likely to pay off first</h3>
+              <ol className="mt-4 grid gap-4 lg:grid-cols-2">
+                {pos.capabilities.map((k, i) => (
+                  <li key={k.name} className="rounded-2xl bg-[color:var(--soft)] p-5">
+                    <p className="font-semibold">{i + 1}. {k.name}</p>
+                    <p className="mt-1 text-sm text-neutral-700">{k.reason}</p>
+                    <ul className="mt-3 space-y-2 text-sm">
+                      {k.implementations.map((m) => <li key={m.text}><span className="font-medium">{m.text}</span> <span className="text-xs text-neutral-500">({m.likelihood} likelihood · measured by {m.kpi.toLowerCase()})</span></li>)}
+                    </ul>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="mx-auto max-w-6xl px-5 py-14">
         <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Today and with the new website</h2>
@@ -108,12 +146,31 @@ export function GrowthPlanView({ c, owner, siteHref }: { c: SiteContent; owner: 
         </ol>
       </section>
 
-      {(g.differentiation.length > 0 || g.strengths.length > 0) && (
+      {!pos?.dimensions.length && (g.differentiation.length > 0 || g.strengths.length > 0) && (
         <section className="bg-neutral-50">
           <div className="mx-auto max-w-6xl px-5 py-14">
             <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Standing out locally</h2>
             <p className="mt-2 text-sm text-neutral-600">From comparing public websites of nearby businesses.</p>
             <ul className="mt-6 grid gap-3 sm:grid-cols-2">{[...g.strengths, ...g.differentiation].map((d) => <li key={d} className="rounded-2xl bg-white p-5 text-sm ring-1 ring-neutral-200">{d}</li>)}</ul>
+          </div>
+        </section>
+      )}
+
+      {pos && pos.outlook.length > 0 && (
+        <section className="bg-neutral-50">
+          <div className="mx-auto max-w-6xl px-5 py-14">
+            <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">Preparing for the next five years</h2>
+            <p className="mt-2 text-sm text-neutral-600">Where the industry is heading, as an outlook rather than a forecast, and how ready {c.brand.name} looks today.</p>
+            <ul className="mt-6 grid gap-4 lg:grid-cols-2">
+              {pos.outlook.map((o) => (
+                <li key={o.trend} className="rounded-2xl bg-white p-5 ring-1 ring-neutral-200">
+                  <div className="flex flex-wrap items-center gap-2 text-xs"><span className="text-neutral-500">{o.horizon}</span><span className="rounded-full bg-neutral-100 px-2.5 py-0.5 font-semibold">{READY[o.readiness]}</span></div>
+                  <h3 className="mt-2 font-semibold">{o.trend}</h3>
+                  <p className="mt-1 text-sm text-neutral-600">{o.implication}</p>
+                  <p className="mt-2 text-sm"><span className="font-medium">How to prepare: </span>{o.prepare}</p>
+                </li>
+              ))}
+            </ul>
           </div>
         </section>
       )}

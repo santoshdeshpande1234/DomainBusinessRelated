@@ -57,7 +57,7 @@ async function gather(x: Pick<Ctx, "db" | "c" | "p">) {
   // The client-facing preview must not mention other prospects or this prospect's competitors.
   const others = [...names!.map((n) => n.name), ...competitors.map((k) => k.name)];
   const inventory = (inv?.inventory as Inventory | undefined)?.pages ? (inv!.inventory as Inventory) : null;
-  return { facts: siteFacts(x), reviews: (x.p.score_detail?.reviews as number | undefined) ?? null, competitors, others, inventory };
+  return { facts: siteFacts(x), reviews: (x.p.score_detail?.reviews as number | undefined) ?? null, rating: (x.p.score_detail?.rating as number | undefined) ?? null, competitors, others, inventory };
 }
 
 /** Snapshots the current content before it changes. Best effort: a failed snapshot never blocks the edit. */
