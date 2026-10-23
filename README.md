@@ -48,12 +48,25 @@ evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
   refinements (premium style, hero, lead generation, engine priority, segment, sections), versions with compare and
   restore. Deterministic code only; the one external call is the app's own home-page check when it is stale.
 - Original website inventory: the prospect's own site is read page by page (navigation, sitemap, robots.txt; up to
-  12 pages, a few per server step). Each page keeps its URL, extraction status and what was missing; testimonials,
-  awards and other claims are set aside for review, never copied.
+  12 pages, a few per server step). Each page keeps its URL, extraction status and what was missing. Customer quotes
+  are kept word for word with their source; vague or numeric claims ("award-winning", "5000+ patients") are set aside
+  for review, never shown. Official social profiles and the share image are captured too.
 - Blueprint: every original page is improved, preserved, merged, replaced or excluded with a reason, and every saved
   Growth Plan item is mapped to the page and component that builds it (built / simulated / proposed / needs review).
   On rebuild the saved plan is the source of truth. The preview becomes a multi-page site (`?page=`), including
   service detail pages, in the business's own logo and colours.
+- Self-contained site: articles and case studies become pages of the proposed site (with source credit), testimonials
+  get their own page when quotes were found, careers is kept in the footer. Visitors only leave for official social
+  profiles, a map, phone or email. Legal pages are never generated.
+- Design system: five directions (Premium Corporate, Modern Minimal, Bold Conversion-Focused, Industry Specialist,
+  Contemporary Editorial) with a palette derived from the brand colour, deepened where needed so buttons and text meet
+  WCAG AA. Switching direction in the studio keeps every page and fact; a version is saved first.
+- Working interactions: navigation with active state, "More" menu and mobile menu; capability lists become tabs with
+  a next step ("Ask about X" opens the form with X selected); a validated enquiry form and a four-step booking request
+  (service, day and time window, details, review). A preview never claims anything was sent.
+- Quality gate: navigation, calls to action, interactive elements, forms, self-containment, accuracy, attributed
+  proof, Growth Plan placement, kept context and contrast, scored on every generation and in the studio. Any failed
+  required check caps the score at 59. Browser checks are reported as "not run here", never as passed.
 
 Rules the code follows: no fabricated data, nothing is bought, sent or deployed without approval, calculations are
 deterministic code, and every external call is logged with its cost.
@@ -97,6 +110,9 @@ npm run test:rls      # row-level security against the local Supabase stack
 npm run test:e2e      # Phase 1 browser walkthrough against a running app (see the file header)
 npm run test:e2e:discovery   # Phase 2 walkthrough; external lookups are pre-loaded into the cache
 npm run test:e2e:studio      # Phase 3 walkthrough; prospects and website checks are seeded
+npm run test:e2e:sites       # generated websites: sample businesses in four industries, every page, link, tab,
+                             # menu, form and booking step, five directions, 390/768/1280 px. Needs the app running
+                             # with SITE_FIXTURES=1 (the /preview/fixture route 404s otherwise); E2E_URL sets the host.
 ```
 
 ## Phases

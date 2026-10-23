@@ -1,5 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
+import { DIRECTIONS, isDirection } from "@/lib/studio/design";
 import { z } from "zod";
 import { requirePerm } from "@/lib/session";
 import { userClient } from "@/lib/supabase/server";
@@ -240,6 +241,21 @@ export async function setSection(campaignId: string, prospectId: string, section
   } catch (e) { return { error: (e as Error).message }; }
 }
 
+/** Switches the design direction. Content, pages and the Growth Plan are untouched; a version is kept first. */
+export async function setDirection(campaignId: string, prospectId: string, direction: string): Promise<StepResult> {
+  try {
+    if (!isDirection(direction)) return { error: "Unknown design direction." };
+    const x = await ctx(campaignId, prospectId);
+    if (!x.w) return { error: "Create a draft first." };
+    if (x.w.theme === direction) return { ok: `Already ${DIRECTIONS[direction].label}.` };
+    await snapshot(x, `Before switching to ${DIRECTIONS[direction].label}`);
+    const { error } = await x.db.from("website_previews").update({ theme: direction, updated_by: x.s.userId }).eq("id", x.w.id);
+    if (error) throw new Error(error.message);
+    done(campaignId, prospectId);
+    return { ok: `${DIRECTIONS[direction].label} applied. Text, pages and the Growth Plan are unchanged.` };
+  } catch (e) { return { error: (e as Error).message }; }
+}
+
 /** Restores a saved version (the current content is kept as a version first). */
 export async function restoreVersion(campaignId: string, prospectId: string, version: number): Promise<StepResult> {
   try {
@@ -264,7 +280,7 @@ const editSchema = z.object({
   eyebrow: line, headline: z.string().trim().min(1).max(120), sub: z.string().trim().max(300),
   primary_cta: z.string().trim().min(1).max(40), secondary_cta: z.string().trim().min(1).max(40),
   services: z.string().max(3000), features: z.string().max(1500), steps: z.string().max(800), about: z.string().trim().max(2000),
-  theme: z.enum(Object.keys(THEMES) as [keyof typeof THEMES]), layout: z.enum(Object.keys(LAYOUTS) as [keyof typeof LAYOUTS]),
+  theme: z.string().refine((t) => isDirection(t) || t in THEMES, "Unknown design direction"), layout: z.enum(Object.keys(LAYOUTS) as [keyof typeof LAYOUTS]),
   domain_id: z.string().uuid().or(z.literal("")),
 });
 const lines = (s: string, max: number) => s.split("\n").map((x) => x.trim()).filter(Boolean).slice(0, max).map((x) => x.slice(0, 200));

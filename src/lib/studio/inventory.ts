@@ -12,9 +12,19 @@ export type PageRecord = {
   paragraphs: string[]; items: string[]; prices: string[]; faqs: { q: string; a: string }[];
   /** Testimonials, awards, certifications and similar, as the business published them. Never shown unchecked. */
   claims: string[];
+  /** Customer quotes as published (blockquotes, or quoted text on a testimonials page). Older inventories don't have them. */
+  quotes?: string[];
   forms: number; booking: boolean; phones: string[]; emails: string[];
 };
-export type Brand = { logo: string | null; accent: string | null; ink: string | null; colorsFrom: string | null };
+export type Social = { network: "facebook" | "instagram" | "linkedin" | "x" | "youtube" | "tiktok" | "pinterest"; url: string };
+export type Brand = {
+  logo: string | null; accent: string | null; ink: string | null; colorsFrom: string | null;
+  // Added with the premium studio; older inventories don't have them.
+  /** Their official social profiles, linked from their own site. */
+  social?: Social[];
+  /** The share image they chose for their site (og:image), used as hero imagery when present. */
+  image?: string | null;
+};
 export type Inventory = {
   root: string; crawled_at: string; brand: Brand; sitemap: boolean; robots: boolean;
   pages: PageRecord[]; queue: string[]; discovered: number;
@@ -140,7 +150,9 @@ export function extractPage(html: string, url: string, kind: PageKind): PageReco
   const paragraphs = [...new Set(all(/<p\b[^>]*>([\s\S]*?)<\/p>/gi).map(clean).filter((t): t is string => !!t))].filter((t) => t.length >= 40 && t.length <= 900).slice(0, 12);
   const items = [...new Set(all(/<li\b[^>]*>([\s\S]*?)<\/li>/gi))].filter((t) => t.length >= 3 && t.length <= 160).filter(keep).slice(0, 24);
   const headings = [...new Set(all(/<h[23]\b[^>]*>([\s\S]*?)<\/h[23]>/gi))].filter((t) => t.length >= 3 && t.length <= 100).filter(keep).slice(0, 16);
-  for (const q of all(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi)) if (q.length >= 20) claims.add(q.slice(0, 300));
+  const quotes = new Set<string>();
+  for (const q of all(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi)) if (q.length >= 20) { claims.add(q.slice(0, 300)); quotes.add(q.slice(0, 400)); }
+  if (kind === "testimonials") for (const q of all(/<p\b[^>]*>([\s\S]*?)<\/p>/gi)) if (/^["“].{20,}["”]/.test(q)) quotes.add(q.slice(0, 400));
   const faqs: { q: string; a: string }[] = [];
   for (const m of body.matchAll(/<details\b[^>]*>\s*<summary\b[^>]*>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/gi)) {
     const q = text(m[1]), a = text(m[2]);
@@ -157,7 +169,7 @@ export function extractPage(html: string, url: string, kind: PageKind): PageReco
   const has = paragraphs.length + items.length + faqs.length > 0;
   return {
     url, kind, status: has ? "extracted" : "empty", note: has ? null : "No readable text found (the page may be built with JavaScript or images).",
-    title, description: decode(meta("description") ?? "").slice(0, 300) || null, h1, headings, paragraphs, items, prices, faqs: faqs.slice(0, 15), claims: [...claims].slice(0, 10),
+    title, description: decode(meta("description") ?? "").slice(0, 300) || null, h1, headings, paragraphs, items, prices, faqs: faqs.slice(0, 15), claims: [...claims].slice(0, 10), quotes: [...quotes].slice(0, 8),
     forms: (html.match(/<form[\s>]/gi) ?? []).length,
     booking: /calendly|acuityscheduling|setmore|simplybook|zocdoc|practo|book (an? )?(appointment|now|online)/i.test(html),
     phones: [...new Set([...html.matchAll(/href=["']tel:([^"']+)["']/gi)].map((m) => decode(m[1]).trim()))].slice(0, 3),
@@ -184,7 +196,31 @@ export function extractBrand(html: string, base: string): Brand {
   const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   const accent = theme && saturation(expand(theme)) > 0.25 && lum(expand(theme)) < 0.8 ? expand(theme) : top;
   const darks = [...styles.matchAll(HEX)].map((m) => expand(m[0])).filter((h) => lum(h) < 0.25 && lum(h) > 0.02);
-  return { logo, accent, ink: darks[0] ?? null, colorsFrom: accent ? (theme && accent === expand(theme) ? "theme-color tag" : "the site's own styles") : null };
+  const image = abs(html.match(/<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']/i)?.[1] ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:image["']/i)?.[1]);
+  return { logo, accent, ink: darks[0] ?? null, colorsFrom: accent ? (theme && accent === expand(theme) ? "theme-color tag" : "the site's own styles") : null, social: extractSocial(html), image };
+}
+
+const SOCIAL: [Social["network"], RegExp][] = [
+  ["facebook", /^https?:\/\/(www\.|m\.)?facebook\.com\/(?!sharer|share|dialog|plugins|tr\b)[^\s"'?#]+/i],
+  ["instagram", /^https?:\/\/(www\.)?instagram\.com\/(?!p\/|share)[^\s"'?#]+/i],
+  ["linkedin", /^https?:\/\/([a-z]{2,3}\.)?linkedin\.com\/(company|in|school)\/[^\s"'?#]+/i],
+  ["x", /^https?:\/\/(www\.)?(twitter|x)\.com\/(?!intent|share|home)[^\s"'?#]+/i],
+  ["youtube", /^https?:\/\/(www\.)?youtube\.com\/(@|c\/|channel\/|user\/)[^\s"'?#]+/i],
+  ["tiktok", /^https?:\/\/(www\.)?tiktok\.com\/@[^\s"'?#]+/i],
+  ["pinterest", /^https?:\/\/([a-z]{2}\.)?pinterest\.[a-z.]+\/(?!pin\/)[^\s"'?#]+/i],
+];
+
+/** Official social profiles linked from a page: one per network, share buttons excluded. */
+export function extractSocial(html: string): Social[] {
+  const out = new Map<Social["network"], string>();
+  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"']+)["']/gi)) {
+    const href = decode(m[1]).trim();
+    for (const [network, re] of SOCIAL) {
+      const hit = href.match(re);
+      if (hit && !out.has(network)) out.set(network, hit[0].replace(/\/$/, ""));
+    }
+  }
+  return [...out.entries()].map(([network, url]) => ({ network, url }));
 }
 
 /** Which discovered pages to read, within the page budget: navigation first, then the sitemap. */

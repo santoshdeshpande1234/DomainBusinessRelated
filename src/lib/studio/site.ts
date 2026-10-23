@@ -3,10 +3,19 @@
 import type { Audit } from "@/lib/discovery/prospects";
 import type { ClientGrowth, EngineKey } from "./growth";
 import type { SitePage } from "./blueprint";
+import { defaultDirection, type DirectionKey } from "./design";
 
 export type Service = { title: string; text: string; source: "website" | "member" | "placeholder"; slug?: string | null };
 export type SiteContent = {
-  brand: { name: string; eyebrow: string; logo?: string | null; colors?: { accent: string; ink: string | null } | null };
+  brand: {
+    name: string; eyebrow: string; logo?: string | null; colors?: { accent: string; ink: string | null } | null;
+    /** Official social profiles and their own share image, from their website. */
+    social?: { network: string; url: string }[]; image?: string | null;
+  };
+  /** The campaign industry, for the palette and default design direction. Older previews don't have it. */
+  industry?: string;
+  /** Public facts that support credibility, each with where it came from. */
+  proof?: { rating?: { value: number; count: number | null; source: string } | null };
   meta: { title: string; description: string };
   hero: { headline: string; sub: string; primary_cta: string; secondary_cta: string };
   services: Service[];
@@ -52,11 +61,6 @@ const CTA: Record<string, [string, string]> = {
   it: ["Talk to us", "Call us"],
   retail: ["Plan your visit", "Call the store"],
 };
-const THEME_FOR: Record<string, ThemeKey[]> = {
-  healthcare: ["harbor", "sage"], professional_services: ["slate", "harbor"], real_estate: ["clay", "harbor"], hospitality: ["clay", "sage"],
-  education: ["slate", "sage"], automotive: ["harbor", "slate"], home_services: ["sage", "harbor"], manufacturing: ["slate", "harbor"],
-  it: ["slate", "harbor"], retail: ["clay", "slate"],
-};
 
 export const PLACEHOLDER = /\[\[[^\]]*\]\]/;
 
@@ -65,12 +69,14 @@ export type SiteFacts = {
   phone: string | null; email: string | null; address: string | null; maps_url: string | null; website: string | null; audit: Audit | null;
 };
 
-/** A deterministic look per business, so two prospects in one campaign don't get identical sites. */
-export function pickDesign(f: Pick<SiteFacts, "id" | "industry">): { theme: ThemeKey; layout: keyof typeof LAYOUTS } {
+/**
+ * The starting design direction for a business: what its industry expects. Colours come from its own
+ * brand, so two prospects in one campaign still look different. `theme` stores the direction.
+ */
+export function pickDesign(f: Pick<SiteFacts, "id" | "industry">): { theme: DirectionKey; layout: keyof typeof LAYOUTS } {
   let h = 2166136261; // FNV-1a: stable across runs and safe to import in the browser
   for (const ch of f.id) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
-  const options = THEME_FOR[f.industry] ?? (Object.keys(THEMES) as ThemeKey[]);
-  return { theme: options[h % options.length], layout: (h >>> 8) % 2 ? "centered" : "split" };
+  return { theme: defaultDirection(f.industry), layout: (h >>> 8) % 2 ? "centered" : "split" };
 }
 
 export function buildSite(f: SiteFacts): SiteContent {
@@ -92,7 +98,7 @@ export function buildSite(f: SiteFacts): SiteContent {
   ].filter((x): x is string => !!x);
 
   return {
-    brand: { name: f.name, eyebrow: f.name },
+    brand: { name: f.name, eyebrow: f.name }, industry: f.industry,
     meta: {
       title: `${f.name}${f.city ? ` | ${what} in ${f.city}` : ` | ${what}`}`.slice(0, 70),
       description: (a?.description ?? `${f.name}: ${what.toLowerCase()}${where}. ${primary} or call to talk to the team.`).slice(0, 160),
@@ -198,7 +204,8 @@ export function validateSite(c: SiteContent, otherBusinesses: string[] = []): st
   const walk = (v: unknown, k = "") => {
     if (typeof v === "string") { if (k !== "url") text.push(v); }
     else if (Array.isArray(v)) v.forEach((x) => walk(x));
-    else if (v && typeof v === "object") for (const [kk, x] of Object.entries(v)) if (kk !== "sources") walk(x, kk);
+    // Quotes and credentials are shown as the business published them, with their source; checked by the quality gate.
+    else if (v && typeof v === "object") for (const [kk, x] of Object.entries(v)) if (kk !== "sources" && kk !== "attributed") walk(x, kk);
   };
   walk(c);
   // Our own disclaimers ("rankings are never guaranteed") are not claims.
