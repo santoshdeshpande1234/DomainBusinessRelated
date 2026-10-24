@@ -226,7 +226,7 @@ describe.skipIf(!up)("row-level security", () => {
     expect((await member.from("proposals").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p })).error).not.toBeNull();
     expect((await other.from("proposals").insert({ workspace_id: B, campaign_id: campaignA, prospect_id: p })).error?.message).toMatch(/does not belong/);
     const c3 = await member.from("campaigns").insert(campaign(A, u.member.id, "Third")).select("id").single();
-    expect((await member.from("proposals").update({ campaign_id: c3.data!.id }).eq("id", id)).error?.message).toMatch(/does not belong/);
+    expect((await member.from("proposals").update({ campaign_id: c3.data!.id }).eq("id", id)).error?.message).toMatch(/cannot be changed/);
 
     const anon = createClient(URL, ANON, opts);
     for (const t of ["proposals", "proposal_versions"]) {
