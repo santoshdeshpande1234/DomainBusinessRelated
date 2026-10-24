@@ -215,4 +215,42 @@ describe.skipIf(!up)("row-level security", () => {
     expect((await anon.from("website_preview_versions").select("*")).data ?? []).toEqual([]);
     expect((await member.from("website_preview_versions").update({ reason: "changed" }).eq("preview_id", web.data!.id)).error).not.toBeNull();
   });
+
+  it("proposals and their versions stay with their prospect and workspace", async () => {
+    const pro = await member.from("prospects").insert({ workspace_id: A, campaign_id: campaignA, name: "Smile Studio", origin: "manual", dedupe_key: `smile${run}|` }).select("id").single();
+    const p = pro.data!.id;
+    const row = await member.from("proposals").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p, content: { title: "Growth proposal" }, created_by: u.member.id }).select("id").single();
+    expect(row.error).toBeNull();
+    const id = row.data!.id;
+    // One proposal per prospect; it can't be moved to another workspace or campaign.
+    expect((await member.from("proposals").insert({ workspace_id: A, campaign_id: campaignA, prospect_id: p })).error).not.toBeNull();
+    expect((await other.from("proposals").insert({ workspace_id: B, campaign_id: campaignA, prospect_id: p })).error?.message).toMatch(/does not belong/);
+    const c3 = await member.from("campaigns").insert(campaign(A, u.member.id, "Third")).select("id").single();
+    expect((await member.from("proposals").update({ campaign_id: c3.data!.id }).eq("id", id)).error?.message).toMatch(/cannot be changed/);
+
+    const anon = createClient(URL, ANON, opts);
+    for (const t of ["proposals", "proposal_versions"]) {
+      expect((await other.from(t).select("*")).data, t).toEqual([]);
+      expect((await anon.from(t).select("*")).data ?? [], t).toEqual([]);
+    }
+    expect((await other.from("proposals").update({ status: "ready" }).eq("id", id).select()).data ?? []).toEqual([]);
+
+    // Viewers read only; status changes are audited.
+    expect((await viewer.from("proposals").select("id")).data!.length).toBe(1);
+    expect((await viewer.from("proposals").update({ status: "ready" }).eq("id", id).select()).data ?? []).toEqual([]);
+    expect((await viewer.from("proposals").delete().eq("id", id).select()).data ?? []).toEqual([]);
+    expect((await member.from("proposals").update({ status: "bogus" }).eq("id", id)).error).not.toBeNull();
+    expect((await member.from("proposals").update({ status: "ready", updated_by: u.member.id }).eq("id", id)).error).toBeNull();
+    const log = await admin.from("audit_logs").select("detail").eq("resource_id", id).eq("action", "proposals.update");
+    expect(log.data![0].detail).toEqual(expect.objectContaining({ status: "ready" }));
+
+    // Versions are append-only snapshots, written as yourself, and tied to the proposal's campaign.
+    const ver = { workspace_id: A, campaign_id: campaignA, proposal_id: id, version: 1, reason: "Before rebuild", content: { title: "Growth proposal" }, emails: [] };
+    expect((await member.from("proposal_versions").insert({ ...ver, created_by: u.member.id })).error).toBeNull();
+    expect((await member.from("proposal_versions").insert({ ...ver, version: 2, created_by: u.admin.id })).error).not.toBeNull();
+    expect((await member.from("proposal_versions").insert({ ...ver, version: 2, campaign_id: c3.data!.id, created_by: u.member.id })).error?.message).toMatch(/does not belong/);
+    expect((await viewer.from("proposal_versions").insert({ ...ver, version: 3, created_by: u.viewer.id })).error).not.toBeNull();
+    expect((await viewer.from("proposal_versions").select("version")).data!.length).toBe(1);
+    expect((await member.from("proposal_versions").update({ reason: "changed" }).eq("proposal_id", id)).error).not.toBeNull();
+  });
 });
