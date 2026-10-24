@@ -210,6 +210,13 @@ describe("generation with the inventory and the saved plan", () => {
     expect(r.content.about).toMatch(/^Dr Rao opened/);
     expect(r.content.brand).toMatchObject({ logo: "https://smile.example/img/logo.png", colors: { accent: "#0b6e78" } });
     expect(r.stages.find((s) => s.key === "blueprint")!.note).toMatch(/9 original page\(s\)/);
+    // Notes for the team (a trust claim left out, another business named) don't make the blueprint a partial result.
+    expect(r.blueprint.review.length).toBeGreaterThan(0);
+    expect(r.stages.find((s) => s.key === "blueprint")).toMatchObject({ status: "done", note: expect.stringMatching(/note\(s\) to review in the studio/) });
+    // A website that hasn't been read page by page does.
+    const unread = compose({ ...input(), inventory: null });
+    if (!unread.ok) throw new Error(unread.error);
+    expect(unread.stages.find((s) => s.key === "blueprint")!.status).toBe("partial");
     expect(validateSite(r.content, ["Bright Teeth Clinic"])).toEqual([]);
   });
 
