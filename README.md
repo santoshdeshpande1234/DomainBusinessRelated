@@ -1,7 +1,7 @@
 # Domain2Revenue AI
 
 Find undervalued domains and local businesses that need a better web presence, and turn the research into
-evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
+evidence-backed proposals. Built in phases; Phases 1–4 are in this code.
 
 **Phase 1, foundation**
 - Invite-only sign-in (password, email link, optional Google) with admin / member / viewer roles
@@ -68,6 +68,20 @@ evidence-backed proposals. Built in phases; Phases 1–3 are in this code.
   proof, Growth Plan placement, kept context and contrast, scored on every generation and in the studio. Any failed
   required check caps the score at 59. Browser checks are reported as "not run here", never as passed.
 
+**Phase 4, proposals** (per selected prospect)
+- One proposal per prospect, built in code from saved research only: the client-safe growth plan (today vs proposed,
+  Growth Engines, scope, rollout, KPIs, dependencies), the shared preview link, the campaign's service prices (or the
+  workspace defaults) and the financial model. No AI calls, no competitor names, no internal notes.
+- Website line priced as a redesign when the business has a site, otherwise a new build; a missing price shows "To be
+  confirmed" and blocks "ready". Expected impact appears only when the financial model is complete, labelled as an
+  estimate with its confidence. Internal checks flag price mismatches with the model, low confidence, an unshared
+  preview and any other business's name in the text.
+- Print-ready A4 view at `/print/proposal/<prospect>` (save as PDF from the browser), editable summary, prices and
+  next steps, versions with restore, and draft / ready / archived status (audited).
+- Three email drafts (first email, follow-ups on day 3 and day 7) that mention only observed gaps and include an
+  opt-out line. Edit, copy, or open them in your own email app. Nothing is sent; sending arrives in Phase 5.
+- Campaign overview at `/campaigns/<id>/proposals` drafts every missing proposal one at a time.
+
 Rules the code follows: no fabricated data, nothing is bought, sent or deployed without approval, calculations are
 deterministic code, and every external call is logged with its cost.
 
@@ -118,4 +132,4 @@ npm run test:e2e:sites       # generated websites: sample businesses in four ind
 ## Phases
 
 1. Foundation · 2. Domain discovery, prospect research, scoring · 3. Website previews, competitor analysis,
-financial model (this release) · 4. Proposals, PDF, email drafts · 5. Approvals, sending, analytics, hardening
+financial model · 4. Proposals, PDF, email drafts (this release) · 5. Approvals, sending, analytics, hardening

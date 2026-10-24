@@ -21,18 +21,20 @@ export default async function ProspectPage({ params }: { params: Promise<{ id: s
   const { id, prospectId } = await params;
   const s = await getSession();
   const db = await userClient();
-  const [{ data: p }, { data: c }, { data: ev = [] }, { count: comps }, { data: fm }, { data: web }] = await Promise.all([
+  const [{ data: p }, { data: c }, { data: ev = [] }, { count: comps }, { data: fm }, { data: web }, { data: prop }] = await Promise.all([
     db.from("prospects").select("*").eq("id", prospectId).eq("campaign_id", id).maybeSingle(),
     db.from("campaigns").select("name").eq("id", id).maybeSingle(),
     db.from("evidence").select("*").eq("prospect_id", prospectId).order("observed_at", { ascending: false }),
     db.from("competitors").select("id", { count: "exact", head: true }).eq("prospect_id", prospectId),
     db.from("financial_models").select("confidence").eq("prospect_id", prospectId).maybeSingle(),
     db.from("website_previews").select("status, share_enabled").eq("prospect_id", prospectId).maybeSingle(),
+    db.from("proposals").select("status").eq("prospect_id", prospectId).maybeSingle(),
   ]);
   const steps: [string, string, string][] = [
     ["competitors", "Competitor analysis", comps ? `${comps} competitor(s)` : "Not started"],
     ["financials", "Financial opportunity", fm ? (fm.confidence != null ? `Calculated, ${fm.confidence}% confidence` : "Inputs needed") : "Not started"],
     ["website", "Website preview", web ? `${web.status}${web.share_enabled ? ", link shared" : ""}` : "Not started"],
+    ["proposal", "Proposal and emails", prop ? prop.status : web ? "Ready to draft" : "Needs the website preview"],
   ];
   if (!p || !c) notFound();
   const write = can(s.role, "campaign:write");

@@ -22,7 +22,7 @@ export default async function ModulePage({ params }: { params: Promise<{ key: st
     const db = await userClient();
     const TABLE: Record<string, [string, string]> = {
       domains: ["domains", "domains"], prospects: ["prospects", "prospects"], competitors: ["competitors", "competitors"],
-      financials: ["financial_models", "models"], studio: ["website_previews", "previews"],
+      financials: ["financial_models", "models"], studio: ["website_previews", "previews"], proposals: ["proposals", "proposals"],
     };
     const [table, noun] = TABLE[key];
     const [{ data: campaigns = [] }, { data: items = [] }] = await Promise.all([
