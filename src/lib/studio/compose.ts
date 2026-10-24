@@ -71,8 +71,14 @@ export function compose(x: ComposeInput): Composed {
     proof: { rating: x.rating != null ? { value: x.rating, count: x.reviews, source: "Google Maps listing" } : null } };
   const count = (k: string) => bp.originals.filter((o) => o.action === k).length;
   const fcount = (k: string) => bp.features.filter((o) => o.status === k).length;
-  stages.push({ key: "blueprint", status: !f.website ? "done" : bp.originals.length ? (bp.review.length ? "partial" : "done") : "partial",
-    note: `${bp.originals.length ? `${bp.originals.length} original page(s): ${count("improved")} improved, ${count("preserved")} preserved, ${count("merged")} merged, ${count("replaced")} replaced, ${count("excluded")} excluded` : f.website ? "Their website hasn't been read page by page" : "No existing website to preserve; built from the listing and the plan"}. ${bp.features.length} plan item(s): ${fcount("implemented")} built, ${fcount("simulated")} simulated, ${fcount("proposed")} proposed, ${fcount("review")} to review. ${bp.pages.length} page(s) in the proposed site.` });
+  // Items for the team to review are notes, not a shortfall. The blueprint fell short only when their site wasn't
+  // read, a plan item couldn't be placed, or much of their readable content had to be left out.
+  const readable = bp.originals.filter((o) => o.extraction === "extracted" && !["legal", "account"].includes(o.kind));
+  const lost = readable.filter((o) => o.action === "excluded").length;
+  const unplaced = bp.features.filter((x) => x.page === "—" && x.status === "review").length;
+  const short = (!!f.website && !bp.originals.length) || unplaced > 0 || lost * 10 > readable.length * 3;
+  stages.push({ key: "blueprint", status: short ? "partial" : "done",
+    note: `${bp.originals.length ? `${bp.originals.length} original page(s): ${count("improved")} improved, ${count("preserved")} preserved, ${count("merged")} merged, ${count("replaced")} replaced, ${count("excluded")} excluded` : f.website ? "Their website hasn't been read page by page" : "No existing website to preserve; built from the listing and the plan"}. ${bp.features.length} plan item(s): ${fcount("implemented")} built, ${fcount("simulated")} simulated, ${fcount("proposed")} proposed, ${fcount("review")} to review. ${bp.pages.length} page(s) in the proposed site.${unplaced ? ` ${unplaced} plan item(s) need a page chosen by hand.` : ""}${bp.review.length ? ` ${bp.review.length} note(s) to review in the studio.` : ""}` });
   stages.push({ key: "content", status: "done", note: keep ? "Growth plan, FAQ and demos refreshed; your text edits were kept." : "Website, growth plan, FAQ and demos built from the facts held." });
 
   const problems = validateSite(content, x.others.filter((n) => n.trim().toLowerCase() !== f.name.trim().toLowerCase()));
